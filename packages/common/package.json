@@ -1,0 +1,23 @@
+{
+  "name": "@betalyra/generative-ui-common",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Common utilities for Generative UI",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "main": "./dist/index.mjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "exports": {
+    "./client": "./dist/client.mjs",
+    "./server": "./dist/server.mjs",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch"
+  },
+  "devDependencies": {}
+}
