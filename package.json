@@ -27,6 +27,7 @@
   },
   "dependencies": {
     "@ai-sdk/google": "^2.0.43",
+    "@ai-sdk/groq": "^2.0.31",
     "@effect/platform": "^0.93.3",
     "@effect/platform-node": "^0.101.1",
     "ai": "6.0.0-beta.114",

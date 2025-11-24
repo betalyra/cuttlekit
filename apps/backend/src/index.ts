@@ -10,8 +10,14 @@ import {
 import { NodeHttpServer, NodeRuntime } from "@effect/platform-node";
 import { Effect, Layer, Schema } from "effect";
 import { createServer } from "node:http";
-import { GenerateService, GenerateServiceLive } from "./services/generate.js";
+import { GenerateServiceLive } from "./services/generate.js";
 import { LlmServiceLive } from "./services/llm.js";
+import { SessionServiceLive } from "./services/session.js";
+import {
+  RequestHandlerService,
+  RequestHandlerServiceLive,
+} from "./services/request-handler.js";
+import { Request, Response } from "./types/messages.js";
 
 const api = HttpApi.make("api")
   .add(
@@ -27,16 +33,8 @@ const api = HttpApi.make("api")
   .add(
     HttpApiGroup.make("generate").add(
       HttpApiEndpoint.post("generate", "/generate")
-        .setPayload(
-          Schema.Struct({
-            prompt: Schema.optional(Schema.String),
-          })
-        )
-        .addSuccess(
-          Schema.Struct({
-            html: Schema.String,
-          })
-        )
+        .setPayload(Request)
+        .addSuccess(Response)
         .addError(HttpApiError.InternalServerError)
     )
   );
@@ -50,19 +48,21 @@ const healthGroupLive = HttpApiBuilder.group(api, "health", (handlers) =>
 );
 
 const generateGroupLive = HttpApiBuilder.group(api, "generate", (handlers) =>
-  Effect.gen(function* () {
-    const generateService = yield* GenerateService;
+  handlers.handle("generate", ({ payload }) =>
+    Effect.gen(function* () {
+      const requestHandler = yield* RequestHandlerService;
 
-    return handlers.handle("generate", ({ payload }) =>
-      Effect.gen(function* () {
-        const html = yield* generateService
-          .generatePage(payload.prompt)
-          .pipe(Effect.mapError(() => new HttpApiError.InternalServerError()));
-        return { html };
-      })
-    );
-  })
-).pipe(Layer.provide(GenerateServiceLive), Layer.provide(LlmServiceLive));
+      return yield* requestHandler.handleRequest(payload).pipe(
+        Effect.mapError(() => new HttpApiError.InternalServerError())
+      );
+    })
+  )
+).pipe(
+  Layer.provide(RequestHandlerServiceLive),
+  Layer.provide(GenerateServiceLive),
+  Layer.provide(SessionServiceLive),
+  Layer.provide(LlmServiceLive)
+);
 
 const ApiLive = HttpApiBuilder.api(api).pipe(
   Layer.provide(healthGroupLive),
