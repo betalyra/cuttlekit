@@ -5,8 +5,22 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Generative UI</title>
+    <script src="https://cdn.tailwindcss.com"></script>
   </head>
   <body>
-    <h1 x-data="{ message: 'I ❤️ Alpine' }" x-text="message"></h1>
+    <div id="app" x-data="generativeUI" @regenerate="regenerate($event.detail)">
+      <div x-show="loading" class="flex items-center justify-center min-h-screen">
+        <div class="text-xl">Generating your page...</div>
+      </div>
+
+      <div x-show="error" class="flex items-center justify-center min-h-screen">
+        <div class="text-red-500">
+          <p>Error: <span x-text="error"></span></p>
+        </div>
+      </div>
+
+      <div x-show="!loading && !error" x-html="content"></div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
