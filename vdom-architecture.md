@@ -1,366 +1,273 @@
 # VDOM Architecture for Generative UI
 
-## Current Architecture
-
-1. **Frontend (Alpine.js)**: Sends requests to backend with action data and form inputs
-2. **Backend**: Passes prompt + conversation history to LLM
-3. **LLM**: Generates **complete HTML** for the entire page
-4. **Backend**: Returns full HTML to frontend
-5. **Frontend**: Replaces entire content via Alpine's `x-html`
-
-### The Performance Problem
-
-Every interaction triggers a **full page regeneration** by the LLM. As the UI grows more complex, generation time increases significantly.
-
-**Key insight**: Network payload size is NOT the bottleneck. HTML is small. The bottleneck is **LLM token generation time**. Generating 2000 tokens takes much longer than generating 200 tokens.
-
----
-
-## Proposed Architecture: LLM Generates Patches
+## Current Architecture (Implemented)
 
 ```
 ┌─────────────┐     ┌─────────────────────────┐     ┌─────────────┐
 │   Client    │────▶│        Server           │────▶│     LLM     │
-│             │     │                         │     │             │
-│  Render     │◀────│  happy-dom (VDOM)       │◀────│  Generate   │
-│  Full HTML  │     │  + diffdom validation   │     │  Patches    │
+│  (vanilla)  │     │                         │     │             │
+│             │     │  happy-dom (VDOM)       │     │  Patches or │
+│  Render     │◀────│  + patch application    │◀────│  Full HTML  │
+│  Full HTML  │     │  + retry loop           │     │             │
 └─────────────┘     └─────────────────────────┘     └─────────────┘
-                              │
-                              ▼
-                    ┌─────────────────┐
-                    │  If patches     │
-                    │  invalid:       │
-                    │  retry with     │
-                    │  error feedback │
-                    └─────────────────┘
 ```
 
-### Core Idea
+### Flow
 
-1. **Server maintains VDOM** using happy-dom (lightweight DOM in Node.js)
-2. **LLM generates patches** (not full HTML) - faster, fewer tokens
-3. **Server applies patches** using diffdom to the VDOM
-4. **Validation with retry**: If patches fail to apply, give LLM error feedback and retry
-5. **Server sends full HTML** to client (serialized from VDOM)
-6. **Client stays simple** - just renders HTML, no patch logic needed
+1. **Client** (pure vanilla JS): Sends requests with `data-action` + form data
+2. **Server**: Maintains VDOM per session via happy-dom
+3. **LLM**: Generates patches (for actions) or full HTML (for prompts/initial)
+4. **Server**: Applies patches to VDOM, validates, retries on error
+5. **Server**: Sends full HTML to client
+6. **Client**: Renders via `innerHTML`
 
-### Why This Works
+### Key Files
 
-| Aspect | Full HTML Generation | Patch Generation |
-|--------|---------------------|------------------|
-| LLM tokens | ~2000 for full page | ~50-200 for patch |
-| Generation time | Slow, scales with page size | Fast, scales with change size |
-| Network payload | ~2KB | ~2KB (still send full HTML) |
-| Client complexity | Simple | Simple |
-| Server complexity | Low | Medium |
+| File | Purpose |
+|------|---------|
+| [vdom.ts](apps/backend/src/services/vdom.ts) | VdomService - happy-dom per session, patch application |
+| [generate.ts](apps/backend/src/services/generate.ts) | GenerateService - `generateFullHtml()` + `generatePatches()` |
+| [request-handler.ts](apps/backend/src/services/request-handler.ts) | Routes requests, retry loop, fallback logic |
+| [session.ts](apps/backend/src/services/session.ts) | SessionService - conversation history |
+| [main.ts](apps/webpage/src/main.ts) | Client - vanilla JS, event delegation |
 
-The win is **LLM generation speed**, not network efficiency. A counter increment that currently requires regenerating 2000 tokens of HTML becomes a 50-token patch operation.
+### Request Routing
 
-### Dropping Alpine.js
-
-Alpine.js becomes unnecessary in this setup:
-- Currently used for: `x-data` state, `x-html` rendering
-- But actual interactivity already uses `data-action` with event delegation
-- With server-rendered HTML, we just need vanilla JS event delegation
-
-The client becomes pure vanilla JS:
-- Fetch HTML from server
-- Render to DOM
-- Event delegation for `data-action` clicks
-- That's it
+| Condition | Action |
+|-----------|--------|
+| No VDOM (new session) | Generate full HTML |
+| Has prompt | Generate full HTML |
+| `action="generate"` | Generate full HTML |
+| `action="reset"` | Clear VDOM, generate full HTML |
+| Other actions | Generate patches → apply → retry on error → fallback to full HTML |
 
 ---
 
-## Patch Format for LLM
+## Patch Format
 
-The LLM needs a simple, unambiguous patch format. Options:
-
-### Option 1: diffdom-style patches
-
-```json
-[
-  { "action": "modifyTextElement", "route": [0, 1, 0], "oldValue": "41", "newValue": "42" },
-  { "action": "modifyAttribute", "route": [0, 2], "name": "class", "newValue": "status online" }
-]
-```
-
-### Option 2: Simplified custom format
-
-```json
-[
-  { "op": "text", "path": "#counter .value", "value": "42" },
-  { "op": "attr", "path": "#status", "attr": "class", "value": "status online" },
-  { "op": "replace", "path": "#todo-list", "html": "<ul>...</ul>" }
-]
-```
-
-### Option 3: CSS selector + operation
+LLM generates CSS selector-based patches:
 
 ```json
 [
   { "selector": "#counter", "text": "42" },
-  { "selector": "#status", "addClass": "online", "removeClass": "offline" },
-  { "selector": "#todos", "append": "<li>New item</li>" }
+  { "selector": "#status", "attr": { "class": "online" } },
+  { "selector": "#todos", "append": "<li>New item</li>" },
+  { "selector": "#item-3", "remove": true }
 ]
 ```
 
-**Recommendation**: Option 3 (CSS selectors) - LLMs understand CSS selectors well, and it's human-readable. We can translate to diffdom format on the server.
+Supported operations:
+- `text` - Set textContent
+- `html` - Set innerHTML
+- `attr` - Set attributes
+- `append` - Insert at end
+- `prepend` - Insert at start
+- `remove` - Remove element
 
 ---
 
-## Server-Side Implementation
+## Token Efficiency
 
-### Tech Stack
+| Scenario | Full HTML | Patches |
+|----------|-----------|---------|
+| Counter increment | ~2000 tokens | ~50 tokens |
+| Add todo item | ~2000 tokens | ~100 tokens |
+| Complex UI change | ~2000 tokens | ~200 tokens |
 
-- **happy-dom**: Lightweight DOM implementation for Node.js
-- **diffdom**: Diff/patch library for DOM trees
-- **Effect**: For service structure (as per project conventions)
+The win is **LLM generation time**, not network size.
 
-### Services
+---
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                    VdomService                          │
-├─────────────────────────────────────────────────────────┤
-│ - Maintains happy-dom Window per session                │
-│ - Applies LLM patches to VDOM                           │
-│ - Serializes VDOM to HTML string                        │
-│ - Validates patches (returns errors for retry)          │
-└─────────────────────────────────────────────────────────┘
-                          │
-                          ▼
-┌─────────────────────────────────────────────────────────┐
-│                  GenerateService                        │
-├─────────────────────────────────────────────────────────┤
-│ - Prompts LLM for patches (not full HTML)               │
-│ - Includes current VDOM state in context                │
-│ - Handles retry loop on patch errors                    │
-│ - Falls back to full regeneration if retries exhausted  │
-└─────────────────────────────────────────────────────────┘
+## Problem: Message History Growth
+
+### Current Issue
+
+The `SessionService` stores conversation history:
+```typescript
+[
+  { role: "user", content: "create a todo app", timestamp: ... },
+  { role: "assistant", content: "[Generated UI: <div>...</div>...]", timestamp: ... },
+  { role: "user", content: "[Action: add-todo] {\"todo\": \"Buy milk\"}", timestamp: ... },
+  { role: "assistant", content: "[Applied 2 patches]", timestamp: ... },
+  // ... grows indefinitely
+]
 ```
 
-### Session State
+Problems:
+1. **Token bloat**: History sent to LLM on each request
+2. **Irrelevant context**: Old actions don't help with new ones
+3. **Cost**: More tokens = more cost + latency
+
+### Key Insight
+
+For generative UI, **the current HTML IS the state**. We don't need full history to understand "what the UI looks like" - the VDOM already has that. History is only useful for:
+1. Understanding user intent evolution
+2. Maintaining conversation context for prompts
+
+---
+
+## Proposed: Tiered History Compression
+
+Based on [compaction research](compaction.md), implement a 3-tier history system:
+
+### Tier 1: Current State (Always Present)
+- **Current HTML** from VDOM (already doing this)
+- **Last 2-4 interactions** verbatim
+
+### Tier 2: Rolling Summary
+- Compressed summary of older interactions
+- Updated when tier 1 overflows
+- Format: Structured, not prose
+
+```typescript
+type RollingSummary = {
+  originalRequest: string           // "user requested a todo app"
+  keyFeatures: string[]             // ["todo list", "add/delete", "counter"]
+  recentChanges: string[]           // ["added 3 todos", "deleted todo-2"]
+  userPreferences: string[]         // ["dark mode", "minimal design"]
+}
+```
+
+### Tier 3: Discarded
+- Very old interactions
+- Only relevant parts extracted to rolling summary
+
+### Implementation
 
 ```typescript
 type SessionState = {
-  history: ConversationMessage[]
-  vdom: Window  // happy-dom Window instance
+  // Tier 1: Recent (verbatim)
+  recentHistory: ConversationMessage[]  // Last N messages
+
+  // Tier 2: Compressed
+  summary: RollingSummary
+
+  // VDOM state (current truth)
+  vdom: Window
 }
-```
 
-### Patch Application Flow
-
-```typescript
-const applyPatches = (session: SessionState, patches: Patch[]) =>
+const compactHistory = (session: SessionState) =>
   Effect.gen(function* () {
-    const errors: string[] = []
+    if (session.recentHistory.length <= MAX_RECENT) return
 
-    for (const patch of patches) {
-      const result = yield* tryApplyPatch(session.vdom.document, patch)
-      if (result._tag === 'Error') {
-        errors.push(result.message)
-      }
-    }
+    // Extract key info from oldest messages
+    const toCompress = session.recentHistory.slice(0, -MAX_RECENT)
 
-    if (errors.length > 0) {
-      return Effect.fail({ type: 'PatchError', errors })
-    }
+    // Use fast model to extract structured summary
+    const extracted = yield* extractKeyInfo(toCompress)
 
-    return session.vdom.document.body.innerHTML
+    // Merge into rolling summary
+    session.summary = mergeSummary(session.summary, extracted)
+
+    // Keep only recent
+    session.recentHistory = session.recentHistory.slice(-MAX_RECENT)
   })
 ```
 
-### Retry Loop
+### Prompt Construction
 
 ```typescript
-const generateWithRetry = (options: GenerateOptions, maxRetries = 2) =>
+const buildContext = (session: SessionState) => `
+CURRENT UI STATE:
+${session.vdom.document.body.innerHTML}
+
+CONTEXT SUMMARY:
+- Original request: ${session.summary.originalRequest}
+- Key features: ${session.summary.keyFeatures.join(", ")}
+- Recent changes: ${session.summary.recentChanges.slice(-3).join(", ")}
+
+RECENT INTERACTIONS:
+${session.recentHistory.map(m => `${m.role}: ${m.content}`).join("\n")}
+`
+```
+
+### Token Budget
+
+| Component | Max Tokens |
+|-----------|------------|
+| Current HTML | ~1500 |
+| Summary | ~200 |
+| Recent history (4 msgs) | ~400 |
+| System prompt | ~500 |
+| **Total context** | ~2600 |
+| LLM response | ~500 |
+| **Total per request** | ~3100 |
+
+### Compression Triggers
+
+Compact when:
+1. `recentHistory.length > MAX_RECENT` (e.g., 6)
+2. Total tokens exceed budget
+3. Time-based (every N minutes for long sessions)
+
+### Fast Model for Compression
+
+Use a cheaper/faster model for summary extraction:
+```typescript
+const extractKeyInfo = (messages: ConversationMessage[]) =>
   Effect.gen(function* () {
-    let lastErrors: string[] = []
+    const fastLlm = yield* FastLlmService  // e.g., Haiku, Flash-Lite
 
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      const patches = yield* llm.generatePatches({
-        ...options,
-        previousErrors: lastErrors  // Feed errors back to LLM
-      })
+    return yield* fastLlm.generate({
+      prompt: `Extract key info from these interactions as JSON:
+        - originalIntent: what did user originally want?
+        - features: what UI features were created?
+        - changes: what significant changes were made?
 
-      const result = yield* vdomService.applyPatches(patches)
-
-      if (result._tag === 'Success') {
-        return result.html
-      }
-
-      lastErrors = result.errors
-    }
-
-    // Fallback: full regeneration
-    yield* Effect.log('Patch retries exhausted, falling back to full generation')
-    return yield* llm.generateFullHtml(options)
+        Messages:
+        ${messages.map(m => `${m.role}: ${m.content}`).join("\n")}`,
+      responseFormat: "json"
+    })
   })
 ```
 
 ---
 
-## LLM Prompt Strategy
+## Alternative: No History for Actions
 
-### System Prompt (simplified)
+Simpler approach: **Don't send history for patch generation at all**.
 
-```
-You are a UI update engine. Given the current HTML state and a user action,
-generate ONLY the patches needed to update the UI.
+Rationale:
+- Current HTML already shows complete UI state
+- Action + actionData tells LLM what to do
+- No history needed to "increment counter" or "add todo"
 
+```typescript
+// For patches, only send:
+const patchPrompt = `
 CURRENT HTML:
 ${currentHtml}
 
-Respond with a JSON array of patches:
-- { "selector": "#id", "text": "new text" } - update text content
-- { "selector": ".class", "html": "<div>...</div>" } - replace innerHTML
-- { "selector": "#id", "attr": { "class": "new-class" } } - set attributes
-- { "selector": "#list", "append": "<li>new item</li>" } - append child
-- { "selector": "#item-3", "remove": true } - remove element
+ACTION: ${action}
+DATA: ${JSON.stringify(actionData)}
 
-Keep patches minimal. Only include what actually changes.
+Generate patches to update the UI.
+`
+// No history!
 ```
 
-### Error Feedback Prompt
+Only send history for:
+- Full HTML generation (prompts, generate action)
+- Complex actions that need context
 
-```
-Your previous patches failed with these errors:
-${errors.join('\n')}
-
-The current HTML state is:
-${currentHtml}
-
-Please generate corrected patches.
-```
+This could reduce token usage by 50-80% for most interactions.
 
 ---
 
-## Client-Side Implementation
+## Implementation Priority
 
-The client becomes minimal vanilla JS:
-
-```typescript
-const app = {
-  sessionId: null,
-
-  async sendAction(action: string, data?: Record<string, unknown>) {
-    const formData = collectFormData()
-
-    const response = await fetch('/generate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sessionId: this.sessionId,
-        action,
-        actionData: { ...formData, ...data }
-      })
-    })
-
-    const { html, sessionId } = await response.json()
-    this.sessionId = sessionId
-    document.getElementById('app').innerHTML = html
-  },
-
-  init() {
-    // Event delegation for data-action
-    document.addEventListener('click', (e) => {
-      const el = e.target.closest('[data-action]')
-      if (el) {
-        e.preventDefault()
-        const action = el.getAttribute('data-action')
-        const data = JSON.parse(el.getAttribute('data-action-data') || '{}')
-        this.sendAction(action, data)
-      }
-    })
-
-    // Enter key handling
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && e.target.matches('input')) {
-        const actionEl = e.target.closest('[data-action]') ||
-                         e.target.closest('div, form')?.querySelector('[data-action]')
-        if (actionEl) {
-          e.preventDefault()
-          actionEl.click()
-        }
-      }
-    })
-
-    // Initial load
-    this.sendAction('init')
-  }
-}
-
-app.init()
-```
-
-No Alpine.js, no VDOM on client, no patch application. Just:
-1. Send action to server
-2. Receive full HTML
-3. Render it
+1. **Quick win**: Remove history from patch generation prompts
+2. **Medium effort**: Implement rolling summary with fast model
+3. **Future**: Semantic retrieval for very long sessions
 
 ---
-
-## Trade-offs
-
-### Pros
-
-- **Faster LLM generation**: Patches are much smaller than full HTML
-- **Simple client**: No client-side VDOM or patch logic
-- **Validation**: Server validates patches before committing
-- **Fallback**: Can always fall back to full regeneration
-- **Debuggable**: Can log patches to see exactly what LLM changed
-
-### Cons
-
-- **Server memory**: Must maintain VDOM per session (happy-dom is lightweight though)
-- **Prompt complexity**: LLM needs to understand patch format
-- **Potential for drift**: If LLM misunderstands current state
-- **New failure mode**: Patch errors require retry logic
-
-### Risk Mitigation
-
-1. **State drift**: Include current HTML in every prompt so LLM always has ground truth
-2. **Patch errors**: Retry loop with error feedback (2-3 attempts)
-3. **Exhausted retries**: Fall back to full HTML generation
-4. **Complex updates**: LLM can always output a full `replace` patch for entire sections
-
----
-
-## Open Questions
-
-1. **Patch granularity**: Should we encourage small patches or allow large section replacements?
-2. **Streaming**: Can we stream patch generation for perceived speed?
-3. **Initial render**: Full HTML generation for first render, then patches?
-4. **Memory cleanup**: When to garbage collect session VDOMs?
-
----
-
-## Implementation Status
-
-✅ **Completed:**
-
-1. **VdomService** ([vdom.ts](apps/backend/src/services/vdom.ts))
-   - Manages happy-dom Window instances per session
-   - Applies patches using native DOM methods
-   - Returns errors for retry loop
-
-2. **GenerateService** ([generate.ts](apps/backend/src/services/generate.ts))
-   - `generateFullHtml()` - for initial render and fallback
-   - `generatePatches()` - for incremental updates
-
-3. **RequestHandlerService** ([request-handler.ts](apps/backend/src/services/request-handler.ts))
-   - Routes to full HTML or patch generation based on context
-   - Implements retry loop (max 2 retries) with error feedback
-   - Falls back to full HTML if patches fail
-
-4. **Client** ([main.ts](apps/webpage/src/main.ts))
-   - Pure vanilla JS (no Alpine.js)
-   - Event delegation for `data-action` clicks
-   - Just renders HTML received from server
 
 ## Next Steps
 
-1. Test with existing todo/counter examples
-2. Measure token reduction and speed improvement
-3. Add streaming for perceived speed
-4. Consider session cleanup/garbage collection
+1. ✅ VDOM architecture implemented
+2. ✅ Patch generation working
+3. ✅ Escape hatch (reset button) added
+4. 🔲 Implement history compaction
+5. 🔲 Measure token reduction
+6. 🔲 Add streaming for perceived speed
+7. 🔲 Session cleanup/garbage collection
