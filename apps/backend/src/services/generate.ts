@@ -183,6 +183,11 @@ NOTE: All input/textarea/select values are automatically collected and sent with
 Just give inputs an id or name attribute, and they'll be included in actionData.
 The input with id="prompt" will be sent as actionData.prompt.
 
+ENTER KEY SUPPORT:
+- Users can press Enter in input fields to trigger the first [data-action] button in the same container
+- Alternatively, you can add data-action directly to an input: <input id="todo" data-action="add-todo">
+- For textareas, Ctrl+Enter or Cmd+Enter triggers the action (regular Enter adds a new line)
+
 Remember: Output only the HTML, nothing else. No explanations, no markdown formatting.`;
 
           const result = yield* Effect.tryPromise({

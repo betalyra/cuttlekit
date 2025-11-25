@@ -118,44 +118,75 @@ Alpine.data("generativeUI", () => ({
   },
 
   init() {
+    // Helper function to trigger action
+    const triggerAction = (actionElement: Element) => {
+      const action = actionElement.getAttribute('data-action');
+      const actionDataAttr = actionElement.getAttribute('data-action-data');
+
+      // Collect all form input values from the page
+      const formData: Record<string, unknown> = {};
+      document.querySelectorAll('input, textarea, select').forEach((input) => {
+        const htmlInput = input as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
+        const id = htmlInput.id;
+        const name = htmlInput.name;
+        const key = id || name;
+
+        if (key) {
+          if (htmlInput instanceof HTMLInputElement && htmlInput.type === 'checkbox') {
+            formData[key] = htmlInput.checked;
+          } else if (htmlInput instanceof HTMLInputElement && htmlInput.type === 'radio') {
+            if (htmlInput.checked) {
+              formData[key] = htmlInput.value;
+            }
+          } else {
+            formData[key] = htmlInput.value;
+          }
+        }
+      });
+
+      // Merge action data with form data
+      const actionData = actionDataAttr ? JSON.parse(actionDataAttr) : {};
+      const mergedData = { ...formData, ...actionData };
+
+      this.sendRequest({
+        type: "generate",
+        action: action || undefined,
+        actionData: Object.keys(mergedData).length > 0 ? mergedData : undefined
+      });
+    };
+
     // Intercept all clicks on [data-action] elements
     document.addEventListener('click', (e) => {
       const el = (e.target as HTMLElement).closest('[data-action]');
       if (el) {
         e.preventDefault();
-        const action = el.getAttribute('data-action');
-        const actionDataAttr = el.getAttribute('data-action-data');
+        triggerAction(el);
+      }
+    });
 
-        // Collect all form input values from the page
-        const formData: Record<string, unknown> = {};
-        document.querySelectorAll('input, textarea, select').forEach((input) => {
-          const htmlInput = input as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
-          const id = htmlInput.id;
-          const name = htmlInput.name;
-          const key = id || name;
+    // Intercept Enter key presses in input/textarea elements
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement)) {
+        // Don't trigger on textareas unless Ctrl/Cmd+Enter
+        if (e.target instanceof HTMLTextAreaElement && !e.ctrlKey && !e.metaKey) {
+          return;
+        }
 
-          if (key) {
-            if (htmlInput instanceof HTMLInputElement && htmlInput.type === 'checkbox') {
-              formData[key] = htmlInput.checked;
-            } else if (htmlInput instanceof HTMLInputElement && htmlInput.type === 'radio') {
-              if (htmlInput.checked) {
-                formData[key] = htmlInput.value;
-              }
-            } else {
-              formData[key] = htmlInput.value;
-            }
-          }
-        });
+        e.preventDefault();
 
-        // Merge action data with form data
-        const actionData = actionDataAttr ? JSON.parse(actionDataAttr) : {};
-        const mergedData = { ...formData, ...actionData };
+        // Check if the input itself has a data-action attribute
+        if (e.target.hasAttribute('data-action')) {
+          triggerAction(e.target);
+          return;
+        }
 
-        this.sendRequest({
-          type: "generate",
-          action: action || undefined,
-          actionData: Object.keys(mergedData).length > 0 ? mergedData : undefined
-        });
+        // Otherwise, find the nearest [data-action] button in the same container
+        const container = e.target.closest('div, form, section') || document.body;
+        const actionButton = container.querySelector('[data-action]');
+
+        if (actionButton) {
+          triggerAction(actionButton);
+        }
       }
     });
 
