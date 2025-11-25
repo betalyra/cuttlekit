@@ -1,200 +1,170 @@
-import "./style.css";
-import Alpine from "alpinejs";
-
-window.Alpine = Alpine;
+import "./style.css"
 
 type GenerateRequest = {
-  type: "generate";
-  prompt?: string;
-  sessionId?: string;
-  action?: string;
-  actionData?: Record<string, unknown>;
-};
+  type: "generate"
+  prompt?: string
+  sessionId?: string
+  action?: string
+  actionData?: Record<string, unknown>
+}
 
-type FullPageResponse = {
-  type: "full-page";
-  html: string;
-  sessionId: string;
-};
+type Response = {
+  type: "full-page" | "partial-update" | "message"
+  html?: string
+  message?: string
+  sessionId: string
+}
 
-type PartialUpdateResponse = {
-  type: "partial-update";
-  operations: Array<{
-    action: "replace" | "append" | "remove";
-    selector: string;
-    html?: string;
-  }>;
-  sessionId: string;
-};
-
-type MessageResponse = {
-  type: "message";
-  message: string;
-  sessionId: string;
-};
-
-type Response = FullPageResponse | PartialUpdateResponse | MessageResponse;
-
-Alpine.data("generativeUI", () => ({
-  content: "",
-  loading: true,
-  error: null as string | null,
+const app = {
   sessionId: null as string | null,
+  loading: false,
 
-  async sendRequest(request: GenerateRequest) {
+  getElements() {
+    return {
+      app: document.getElementById("app")!,
+      loadingEl: document.getElementById("loading")!,
+      errorEl: document.getElementById("error")!,
+      contentEl: document.getElementById("content")!,
+    }
+  },
+
+  setLoading(loading: boolean, isInitial = false) {
+    this.loading = loading
+    const { loadingEl, contentEl } = this.getElements()
+
+    // Only show full loading screen on initial load (no content yet)
+    // For subsequent requests, keep content visible (smoother UX)
+    if (isInitial) {
+      loadingEl.style.display = loading ? "flex" : "none"
+      contentEl.style.display = loading ? "none" : "block"
+    } else {
+      loadingEl.style.display = "none"
+      contentEl.style.display = "block"
+      // Could add a subtle loading indicator here (e.g., opacity, spinner overlay)
+      contentEl.style.opacity = loading ? "0.7" : "1"
+    }
+  },
+
+  setError(error: string | null) {
+    const { errorEl, contentEl } = this.getElements()
+    if (error) {
+      errorEl.style.display = "flex"
+      errorEl.querySelector("span")!.textContent = error
+      contentEl.style.display = "none"
+    } else {
+      errorEl.style.display = "none"
+    }
+  },
+
+  async sendRequest(request: GenerateRequest, isInitial = false) {
     try {
-      this.loading = true;
-      this.error = null;
+      this.setLoading(true, isInitial)
+      this.setError(null)
 
       const requestWithSession = {
         ...request,
         sessionId: this.sessionId || undefined,
-      };
+      }
 
       const response = await fetch("http://localhost:34512/generate", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(requestWithSession),
-      });
+      })
 
       if (!response.ok) {
-        throw new Error("Failed to generate content");
+        throw new Error("Failed to generate content")
       }
 
-      const data = (await response.json()) as Response;
+      const data = (await response.json()) as Response
+      this.sessionId = data.sessionId
 
-      // Update session ID
-      this.sessionId = data.sessionId;
-
-      // Handle different response types
-      if (data.type === "full-page") {
-        this.content = data.html;
-      } else if (data.type === "partial-update") {
-        this.applyOperations(data.operations);
-      } else if (data.type === "message") {
-        console.log("Chat message:", data.message);
-        // For now, just log chat messages - we can add a chat UI later
+      if (data.type === "full-page" && data.html) {
+        this.getElements().contentEl.innerHTML = data.html
       }
     } catch (err) {
-      this.error = err instanceof Error ? err.message : String(err);
+      this.setError(err instanceof Error ? err.message : String(err))
     } finally {
-      this.loading = false;
+      this.setLoading(false, isInitial)
     }
   },
 
-  applyOperations(
-    operations: Array<{
-      action: "replace" | "append" | "remove";
-      selector: string;
-      html?: string;
-    }>
-  ) {
-    operations.forEach((op) => {
-      const element = document.querySelector(op.selector);
-      if (!element) {
-        console.warn(`Element not found: ${op.selector}`);
-        return;
-      }
+  collectFormData(): Record<string, unknown> {
+    const formData: Record<string, unknown> = {}
 
-      if (op.action === "replace" && op.html) {
-        element.outerHTML = op.html;
-      } else if (op.action === "append" && op.html) {
-        element.insertAdjacentHTML("beforeend", op.html);
-      } else if (op.action === "remove") {
-        element.remove();
+    document.querySelectorAll("input, textarea, select").forEach((input) => {
+      const el = input as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
+      const key = el.id || el.name
+      if (!key) return
+
+      if (el instanceof HTMLInputElement && el.type === "checkbox") {
+        formData[key] = el.checked
+      } else if (el instanceof HTMLInputElement && el.type === "radio") {
+        if (el.checked) formData[key] = el.value
+      } else {
+        formData[key] = el.value
       }
-    });
+    })
+
+    return formData
   },
 
-  regenerate(prompt: string) {
-    if (prompt && prompt.trim()) {
-      this.sendRequest({
-        type: "generate",
-        prompt: prompt,
-      });
-    }
+  triggerAction(actionElement: Element) {
+    const action = actionElement.getAttribute("data-action")
+    const actionDataAttr = actionElement.getAttribute("data-action-data")
+
+    const formData = this.collectFormData()
+    const actionData = actionDataAttr ? JSON.parse(actionDataAttr) : {}
+    const mergedData = { ...formData, ...actionData }
+
+    this.sendRequest({
+      type: "generate",
+      action: action || undefined,
+      actionData: Object.keys(mergedData).length > 0 ? mergedData : undefined,
+    })
   },
 
   init() {
-    // Helper function to trigger action
-    const triggerAction = (actionElement: Element) => {
-      const action = actionElement.getAttribute('data-action');
-      const actionDataAttr = actionElement.getAttribute('data-action-data');
-
-      // Collect all form input values from the page
-      const formData: Record<string, unknown> = {};
-      document.querySelectorAll('input, textarea, select').forEach((input) => {
-        const htmlInput = input as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
-        const id = htmlInput.id;
-        const name = htmlInput.name;
-        const key = id || name;
-
-        if (key) {
-          if (htmlInput instanceof HTMLInputElement && htmlInput.type === 'checkbox') {
-            formData[key] = htmlInput.checked;
-          } else if (htmlInput instanceof HTMLInputElement && htmlInput.type === 'radio') {
-            if (htmlInput.checked) {
-              formData[key] = htmlInput.value;
-            }
-          } else {
-            formData[key] = htmlInput.value;
-          }
-        }
-      });
-
-      // Merge action data with form data
-      const actionData = actionDataAttr ? JSON.parse(actionDataAttr) : {};
-      const mergedData = { ...formData, ...actionData };
-
-      this.sendRequest({
-        type: "generate",
-        action: action || undefined,
-        actionData: Object.keys(mergedData).length > 0 ? mergedData : undefined
-      });
-    };
-
-    // Intercept all clicks on [data-action] elements
-    document.addEventListener('click', (e) => {
-      const el = (e.target as HTMLElement).closest('[data-action]');
+    // Click handler for data-action elements
+    document.addEventListener("click", (e) => {
+      const el = (e.target as HTMLElement).closest("[data-action]")
       if (el) {
-        e.preventDefault();
-        triggerAction(el);
+        e.preventDefault()
+        this.triggerAction(el)
       }
-    });
+    })
 
-    // Intercept Enter key presses in input/textarea elements
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement)) {
-        // Don't trigger on textareas unless Ctrl/Cmd+Enter
-        if (e.target instanceof HTMLTextAreaElement && !e.ctrlKey && !e.metaKey) {
-          return;
+    // Enter key handler
+    document.addEventListener("keydown", (e) => {
+      const target = e.target as HTMLElement
+      const isInput = target instanceof HTMLInputElement
+      const isTextarea = target instanceof HTMLTextAreaElement
+
+      if (e.key === "Enter" && (isInput || isTextarea)) {
+        // Textarea needs Ctrl/Cmd+Enter
+        if (isTextarea && !e.ctrlKey && !e.metaKey) return
+
+        e.preventDefault()
+
+        // Check if input itself has data-action
+        if (target.hasAttribute("data-action")) {
+          this.triggerAction(target)
+          return
         }
 
-        e.preventDefault();
-
-        // Check if the input itself has a data-action attribute
-        if (e.target.hasAttribute('data-action')) {
-          triggerAction(e.target);
-          return;
-        }
-
-        // Otherwise, find the nearest [data-action] button in the same container
-        const container = e.target.closest('div, form, section') || document.body;
-        const actionButton = container.querySelector('[data-action]');
-
+        // Find nearest action button in container
+        const container = target.closest("div, form, section") || document.body
+        const actionButton = container.querySelector("[data-action]")
         if (actionButton) {
-          triggerAction(actionButton);
+          this.triggerAction(actionButton)
         }
       }
-    });
+    })
 
     // Initial load
-    this.sendRequest({
-      type: "generate",
-    });
+    this.sendRequest({ type: "generate" }, true)
   },
-}));
+}
 
-Alpine.start();
+// Start the app
+app.init()

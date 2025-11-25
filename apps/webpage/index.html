@@ -8,18 +8,18 @@
     <script src="https://cdn.tailwindcss.com"></script>
   </head>
   <body>
-    <div id="app" x-data="generativeUI" @regenerate="regenerate($event.detail)">
-      <div x-show="loading" class="flex items-center justify-center min-h-screen">
+    <div id="app">
+      <div id="loading" class="flex items-center justify-center min-h-screen">
         <div class="text-xl">Generating your page...</div>
       </div>
 
-      <div x-show="error" class="flex items-center justify-center min-h-screen">
+      <div id="error" class="hidden items-center justify-center min-h-screen">
         <div class="text-red-500">
-          <p>Error: <span x-text="error"></span></p>
+          <p>Error: <span></span></p>
         </div>
       </div>
 
-      <div x-show="!loading && !error" x-html="content"></div>
+      <div id="content"></div>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

@@ -11,7 +11,8 @@
     "build:backend": "pnpm --filter @betalyra/generative-ui-backend build",
     "dev:common": "pnpm --filter @betalyra/generative-ui-common dev",
     "build:common": "pnpm --filter @betalyra/generative-ui-common build",
-    "preview:common": "pnpm --filter @betalyra/generative-ui-common preview"
+    "preview:common": "pnpm --filter @betalyra/generative-ui-common preview",
+    "dev:vdom-demo": "tsx scripts/vdom-demo.ts"
   },
   "devDependencies": {
     "@types/alpinejs": "^3.13.11",
@@ -32,7 +33,9 @@
     "@effect/platform-node": "^0.101.1",
     "ai": "6.0.0-beta.114",
     "alpinejs": "^3.15.2",
+    "diff-dom": "^5.2.1",
     "effect": "^3.19.6",
+    "happy-dom": "^20.0.10",
     "tsdown": "^0.16.6"
   }
 }
