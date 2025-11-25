@@ -5,6 +5,9 @@ export const GenerateRequest = Schema.Struct({
   type: Schema.Literal("generate"),
   prompt: Schema.optional(Schema.String),
   sessionId: Schema.optional(Schema.String),
+  // Server-side action support
+  action: Schema.optional(Schema.String),
+  actionData: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
 });
 
 export const UpdateRequest = Schema.Struct({

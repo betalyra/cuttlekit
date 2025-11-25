@@ -30,20 +30,35 @@ export const RequestHandlerServiceLive = Layer.effect(
 
           // Process based on request type
           if (request.type === "generate") {
-            // Add user message to history if prompt exists
-            if (request.prompt) {
+            // Get current application state
+            const state = yield* sessionService.getState(sessionId);
+
+            // Extract prompt from either request.prompt or actionData.prompt
+            const prompt = request.prompt || (request.actionData?.prompt as string | undefined);
+
+            // Add user message to history if prompt exists or action triggered
+            if (prompt) {
               yield* sessionService.addMessage(sessionId, {
                 role: "user",
-                content: request.prompt,
+                content: prompt,
+                timestamp: Date.now(),
+              });
+            } else if (request.action) {
+              yield* sessionService.addMessage(sessionId, {
+                role: "user",
+                content: `[Action triggered: ${request.action}]`,
                 timestamp: Date.now(),
               });
             }
 
             // Generate content
             const html = yield* generateService.generate({
-              prompt: request.prompt,
+              prompt,
               history,
               type: "full-page",
+              action: request.action,
+              actionData: request.actionData,
+              state,
             });
 
             // Add assistant response to history

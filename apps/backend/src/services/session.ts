@@ -17,6 +17,13 @@ export class SessionService extends Context.Tag("SessionService")<
       message: ConversationMessage
     ) => Effect.Effect<void, never, never>;
     readonly generateSessionId: () => Effect.Effect<string, never, never>;
+    readonly getState: (
+      sessionId: string
+    ) => Effect.Effect<Record<string, unknown>, never, never>;
+    readonly setState: (
+      sessionId: string,
+      state: Record<string, unknown>
+    ) => Effect.Effect<void, never, never>;
   }
 >() {}
 
@@ -27,6 +34,12 @@ export const SessionServiceLive = Layer.effect(
     // Maps session ID to array of messages
     const sessionsRef = yield* Ref.make(
       new Map<string, ConversationMessage[]>()
+    );
+
+    // Create a mutable reference to store application state
+    // Maps session ID to application state
+    const stateRef = yield* Ref.make(
+      new Map<string, Record<string, unknown>>()
     );
 
     return {
@@ -57,6 +70,21 @@ export const SessionServiceLive = Layer.effect(
           () =>
             `session-${Date.now()}-${Math.random().toString(36).substring(7)}`
         ),
+
+      getState: (sessionId: string) =>
+        Effect.gen(function* () {
+          const states = yield* Ref.get(stateRef);
+          return states.get(sessionId) || {};
+        }),
+
+      setState: (sessionId: string, state: Record<string, unknown>) =>
+        Effect.gen(function* () {
+          yield* Ref.update(stateRef, (states) => {
+            const newStates = new Map(states);
+            newStates.set(sessionId, state);
+            return newStates;
+          });
+        }),
     };
   })
 );
