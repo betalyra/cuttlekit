@@ -21,7 +21,14 @@ export class RequestHandlerService extends Effect.Service<RequestHandlerService>
           const sessionId = request.sessionId || (yield* sessionService.generateSessionId())
 
           // Get current VDOM HTML (null if new session)
-          const currentHtml = yield* vdomService.getHtml(sessionId)
+          // Fall back to client-provided HTML if server doesn't have VDOM (e.g., after restart)
+          const serverHtml = yield* vdomService.getHtml(sessionId)
+          const currentHtml = serverHtml ?? (request.type === "generate" ? request.currentHtml : undefined) ?? null
+
+          // If client provided HTML but server didn't have it, restore the VDOM
+          if (!serverHtml && currentHtml) {
+            yield* vdomService.setHtml(sessionId, currentHtml)
+          }
 
           // Note: History is recorded but not sent to LLM (quick win optimization)
           // Future: Will implement rolling summary for context
@@ -63,11 +70,13 @@ export class RequestHandlerService extends Effect.Service<RequestHandlerService>
 
               // Don't send history to LLM - current HTML is the state
               // History is recorded for future rolling summary feature
+              // Pass currentHtml when modifying existing UI (not on reset)
               const html = yield* generateService.generateFullHtml({
                 prompt,
                 // history omitted - will use rolling summary in future
                 action: request.action,
                 actionData: request.actionData,
+                currentHtml: isResetAction ? undefined : currentHtml ?? undefined,
               })
 
               // Store in VDOM
@@ -135,6 +144,7 @@ export class RequestHandlerService extends Effect.Service<RequestHandlerService>
                 // history omitted - will use rolling summary in future
                 action: request.action,
                 actionData: request.actionData,
+                currentHtml,
               })
 
               yield* vdomService.setHtml(sessionId, html)
@@ -163,6 +173,7 @@ export class RequestHandlerService extends Effect.Service<RequestHandlerService>
             const response = yield* generateService.generateFullHtml({
               prompt: request.message,
               // history omitted - will use rolling summary in future
+              currentHtml: currentHtml ?? undefined,
             })
 
             yield* sessionService.addMessage(sessionId, {
@@ -184,6 +195,7 @@ export class RequestHandlerService extends Effect.Service<RequestHandlerService>
           const html = yield* generateService.generateFullHtml({
             prompt: request.prompt,
             // history omitted - will use rolling summary in future
+            currentHtml: currentHtml ?? undefined,
           })
 
           yield* vdomService.setHtml(sessionId, html)

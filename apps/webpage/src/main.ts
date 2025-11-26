@@ -6,6 +6,7 @@ type GenerateRequest = {
   sessionId?: string
   action?: string
   actionData?: Record<string, unknown>
+  currentHtml?: string
 }
 
 type Response = {
@@ -61,9 +62,13 @@ const app = {
       this.setLoading(true, isInitial)
       this.setError(null)
 
+      // Include current HTML so server can preserve state even after restart
+      const currentHtml = this.getElements().contentEl.innerHTML || undefined
+
       const requestWithSession = {
         ...request,
         sessionId: this.sessionId || undefined,
+        currentHtml: currentHtml && currentHtml.trim() ? currentHtml : undefined,
       }
 
       const response = await fetch("http://localhost:34512/generate", {

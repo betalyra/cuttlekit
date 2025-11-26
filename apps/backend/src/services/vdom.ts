@@ -7,7 +7,7 @@ import { Window } from "happy-dom"
 
 export type Patch =
   | { selector: string; text: string }
-  | { selector: string; attr: Record<string, string> }
+  | { selector: string; attr: Record<string, string | null> }
   | { selector: string; append: string }
   | { selector: string; prepend: string }
   | { selector: string; html: string }
@@ -46,7 +46,11 @@ export class VdomService extends Effect.Service<VdomService>()("VdomService", {
             el.textContent = patch.text
           } else if ("attr" in patch) {
             Object.entries(patch.attr).forEach(([key, value]) => {
-              el.setAttribute(key, value)
+              if (value === null) {
+                el.removeAttribute(key)
+              } else {
+                el.setAttribute(key, value)
+              }
             })
           } else if ("append" in patch) {
             el.insertAdjacentHTML("beforeend", patch.append)

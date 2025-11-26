@@ -8,6 +8,8 @@ export const GenerateRequest = Schema.Struct({
   // Server-side action support
   action: Schema.optional(Schema.String),
   actionData: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
+  // Client can send current HTML to preserve state across server restarts
+  currentHtml: Schema.optional(Schema.String),
 });
 
 export const UpdateRequest = Schema.Struct({

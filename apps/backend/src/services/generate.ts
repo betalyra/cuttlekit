@@ -9,6 +9,7 @@ export type GenerateOptions = {
   history?: ConversationMessage[]
   action?: string
   actionData?: Record<string, unknown>
+  currentHtml?: string
 }
 
 export type GeneratePatchesOptions = {
@@ -27,7 +28,7 @@ export class GenerateService extends Effect.Service<GenerateService>()("Generate
       Effect.gen(function* () {
         yield* Effect.log("Generating full HTML", options)
 
-        const { prompt, history = [], action, actionData } = options
+        const { prompt, history = [], action, actionData, currentHtml } = options
 
         const historyContext =
           history.length > 0
@@ -44,8 +45,15 @@ Action Data: ${JSON.stringify(actionData, null, 2)}
 The user triggered an action. Generate the appropriate UI.`
           : ""
 
+        const currentHtmlContext = currentHtml
+          ? `\n\nCURRENT UI STATE:
+${currentHtml}
+
+IMPORTANT: The user wants to MODIFY the existing UI above. Preserve the existing design, layout, colors, and style. Only make changes that are explicitly requested.`
+          : ""
+
         const systemPrompt = `You are a Generative UI Engine that creates interactive web interfaces.
-${historyContext}${actionContext}
+${historyContext}${actionContext}${currentHtmlContext}
 
 ${
   action
@@ -72,8 +80,22 @@ TECHNICAL REQUIREMENTS:
 INTERACTIVITY:
 Use data-action attributes for clickable elements:
 - <button data-action="increment">+</button>
-- <button data-action="delete" data-action-data='{"id": "123"}'>Delete</button>
+- <button id="delete-123" data-action="delete" data-action-data="{&quot;id&quot;:&quot;123&quot;}">Delete</button>
 - All input values are automatically collected and sent with actions
+
+CRITICAL - UNIQUE IDs:
+ALWAYS add unique id attributes to ALL interactive and dynamic elements:
+- Checkboxes: id="todo-1-checkbox", id="todo-2-checkbox"
+- List items: id="todo-1", id="todo-2"
+- Buttons with data: id="delete-1", id="toggle-1"
+- Any element that might be updated: id="counter-value", id="status-text"
+This is REQUIRED for the patch system to work correctly. Never rely on complex attribute selectors.
+
+CRITICAL - JSON IN ATTRIBUTES:
+When using data-action-data, use HTML entities for quotes:
+- CORRECT: data-action-data="{&quot;id&quot;:&quot;4&quot;}"
+- WRONG: data-action-data='{"id":"4"}' or data-action-data="{\"id\":\"4\"}"
+Always use &quot; for quotes inside attribute values.
 
 CRITICAL - ESCAPE HATCH:
 ALWAYS include a way for the user to request changes or reset. Options:
@@ -131,23 +153,35 @@ PATCH TYPES:
 - { "selector": "#id", "text": "new text" } - Set text content
 - { "selector": ".class", "html": "<div>...</div>" } - Replace innerHTML
 - { "selector": "#id", "attr": { "class": "new-class", "disabled": "true" } } - Set attributes
+- { "selector": "#id", "attr": { "checked": null } } - Remove attribute (use null to uncheck checkboxes)
 - { "selector": "#list", "append": "<li>new item</li>" } - Append child HTML
 - { "selector": "#list", "prepend": "<li>new item</li>" } - Prepend child HTML
 - { "selector": "#item", "remove": true } - Remove element
 
 RULES:
 1. Output ONLY a valid JSON array of patches
-2. Use CSS selectors that exist in the current HTML
-3. Keep patches minimal - only change what's needed
-4. For counters/numbers: just update the text content
-5. For lists: use append/prepend to add items, remove to delete
-6. IDs are most reliable selectors
+2. ALWAYS use simple ID selectors like "#todo-1", "#counter-value", "#delete-btn-1"
+3. NEVER use complex attribute selectors like [data-action-data='{"id":"1"}'] - they will FAIL
+4. Keep patches minimal - only change what's needed
+5. For counters/numbers: just update the text content
+6. For lists: use append/prepend to add items, remove to delete
+7. For checkboxes: use "#todo-1-checkbox" not input[data-action="toggle"]
+8. For boolean attributes (checked, disabled): use "checked" to set, null to remove
+
+Example for checking a checkbox:
+[{"selector": "#todo-1-checkbox", "attr": {"checked": "checked"}}]
+
+Example for unchecking a checkbox (use null to remove the attribute):
+[{"selector": "#todo-1-checkbox", "attr": {"checked": null}}]
 
 Example for incrementing a counter with current value "5":
 [{"selector": "#counter-value", "text": "6"}]
 
-Example for adding a todo:
-[{"selector": "#todo-list", "append": "<li id=\\"todo-4\\">New task</li>"}]
+Example for adding a todo (note: use &quot; for JSON in attributes):
+[{"selector": "#todo-list", "append": "<li id=\\"todo-4\\"><input type=\\"checkbox\\" id=\\"todo-4-checkbox\\" data-action=\\"toggle\\" data-action-data=\\"{&quot;id&quot;:&quot;4&quot;}\\"> New task</li>"}]
+
+Example for deleting a todo:
+[{"selector": "#todo-1", "remove": true}]
 
 Output ONLY the JSON array, no explanation, no markdown.`
 
