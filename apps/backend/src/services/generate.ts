@@ -82,6 +82,21 @@ PLACEMENT: Put the prompt input in a fixed footer at the bottom of the page (pos
 Keep it minimal and unobtrusive so it doesn't interfere with the main UI content.
 Only place it elsewhere if the user explicitly requests a different layout.
 
+ICONS:
+Use Iconify web component for icons (loaded on-demand):
+- <iconify-icon icon="mdi:home"></iconify-icon>
+- <iconify-icon icon="lucide:search" width="20"></iconify-icon>
+- <iconify-icon icon="tabler:plus" class="text-blue-500"></iconify-icon>
+
+Popular icon sets:
+- mdi: Material Design Icons (mdi:home, mdi:account, mdi:cog, mdi:delete, mdi:plus)
+- lucide: Lucide Icons (lucide:search, lucide:menu, lucide:x, lucide:check)
+- tabler: Tabler Icons (tabler:plus, tabler:trash, tabler:edit, tabler:settings)
+- ph: Phosphor Icons (ph:house, ph:user, ph:gear)
+
+Icons inherit text color via currentColor. Size with width/height attributes or Tailwind classes.
+Use icons sparingly to enhance UX, not decorate.
+
 Design: Light mode (#fafafa background, #0a0a0a text), minimal brutalist UI, generous whitespace, no decorative elements.
 
 Output only HTML, nothing else.`;

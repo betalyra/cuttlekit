@@ -219,6 +219,39 @@ A chronological journey building an AI-powered generative UI system.
 
 ---
 
+## Step 15: On-Demand Icons with Iconify
+
+**Problem:** AI-generated UIs lack visual polish. Icons would help, but bundling icon libraries bloats the frontend.
+
+**Solution:** Iconify web component with on-demand loading from CDN.
+
+**How it works:**
+1. Include single script: `<script src="https://code.iconify.design/iconify-icon/2.3.0/iconify-icon.min.js"></script>`
+2. AI generates icons as: `<iconify-icon icon="mdi:home"></iconify-icon>`
+3. Web component fetches icon SVG from Iconify API on first render
+4. Icons are cached in localStorage for subsequent loads
+
+**System prompt addition:**
+```
+ICONS:
+Use Iconify web component for icons (loaded on-demand):
+- <iconify-icon icon="mdi:home"></iconify-icon>
+- <iconify-icon icon="lucide:search" width="20"></iconify-icon>
+
+Popular icon sets: mdi, lucide, tabler, ph
+Icons inherit text color via currentColor.
+```
+
+**Trade-offs:**
+- ~50KB one-time cost for web component script
+- ~50-100ms latency on first load of each unique icon
+- Requires internet (icons cached after first fetch)
+- Access to 200,000+ icons without bundling any
+
+**Result:** AI can now generate UIs with contextual icons. Navigation menus, action buttons, and status indicators look polished without any bundle size impact per icon.
+
+---
+
 ## Key Takeaways
 
 1. **Plain HTML over JSX** - AI can steer a responsive frontend by generating plain HTML
