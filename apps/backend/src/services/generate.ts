@@ -20,6 +20,20 @@ const PatchSchema = z.union([
 
 const PatchArraySchema = z.array(PatchSchema);
 
+// Unified response schema - AI decides the mode
+const UnifiedResponseSchema = z.union([
+  z.object({
+    mode: z.literal("patches"),
+    patches: PatchArraySchema,
+  }),
+  z.object({
+    mode: z.literal("full"),
+    html: z.string(),
+  }),
+]);
+
+export type UnifiedResponse = z.infer<typeof UnifiedResponseSchema>;
+
 export type GenerateOptions = {
   prompt?: string;
   history?: ConversationMessage[];
@@ -97,6 +111,17 @@ Popular icon sets:
 Icons inherit text color via currentColor. Size with width/height attributes or Tailwind classes.
 Use icons sparingly to enhance UX, not decorate.
 
+FONTS:
+Use any Google Font or open-source font by name (loaded on-demand from Fontsource CDN):
+- Inter, Roboto, Open Sans (clean sans-serif)
+- Playfair Display, Merriweather (elegant serif)
+- JetBrains Mono, Fira Code (monospace)
+- Space Grotesk, Poppins (modern geometric)
+
+Example: style="font-family: 'Space Grotesk', sans-serif"
+
+Stick to Inter unless a specific aesthetic is requested.
+
 Design: Light mode (#fafafa background, #0a0a0a text), minimal brutalist UI, generous whitespace, no decorative elements.
 
 Output only HTML, nothing else.`;
@@ -141,6 +166,82 @@ Example for deleting a todo:
 [{"selector": "#todo-1", "remove": true}]
 
 Output ONLY the JSON array, no explanation, no markdown.`;
+
+// Unified system prompt - AI decides mode
+const UNIFIED_SYSTEM_PROMPT = `You are a Generative UI Engine that creates and updates interactive web interfaces.
+
+OUTPUT FORMAT:
+Return a JSON object with one of these structures:
+
+1. PATCHES MODE (for small, targeted updates):
+{"mode": "patches", "patches": [
+  {"selector": "#id", "text": "new text"},
+  {"selector": "#id", "attr": {"class": "new-class"}},
+  {"selector": "#list", "append": "<li>new</li>"},
+  {"selector": "#id", "remove": true}
+]}
+
+2. FULL HTML MODE (for new UIs or major changes):
+{"mode": "full", "html": "<div>...complete HTML...</div>"}
+
+WHEN TO USE EACH MODE:
+- Use PATCHES for: counter increments, checkbox toggles, adding/removing list items, style changes to specific elements
+- Use FULL HTML for: initial page generation, major redesigns, when the request affects most of the page, or when no current HTML exists
+
+PATCH TYPES:
+- {"selector": "#id", "text": "new text"} - Set text content
+- {"selector": "#id", "html": "<div>...</div>"} - Replace innerHTML
+- {"selector": "#id", "attr": {"class": "x", "style": "..."}} - Set attributes (null removes)
+- {"selector": "#list", "append": "<li>...</li>"} - Append child
+- {"selector": "#list", "prepend": "<li>...</li>"} - Prepend child
+- {"selector": "#id", "remove": true} - Remove element
+
+PATCH RULES:
+- Use simple ID selectors (#id) - complex selectors will fail
+- Check the CURRENT HTML for actual element IDs before patching
+- For multiple style changes, batch them in one patch with the html type on a container
+
+HTML RULES (when mode is "full"):
+- Return ONLY raw HTML - no markdown, no code blocks
+- Do NOT include <html>, <head>, <body>, <script>, or <style> tags
+- Start directly with a <div> element
+- Style with Tailwind CSS utility classes
+
+INTERACTIVITY:
+Use data-action attributes for interactive elements:
+- <button data-action="increment">+</button>
+- <button id="delete-123" data-action="delete" data-action-data="{&quot;id&quot;:&quot;123&quot;}">Delete</button>
+- <input type="checkbox" id="todo-1-checkbox" data-action="toggle" data-action-data="{&quot;id&quot;:&quot;1&quot;}">
+
+CRITICAL - UNIQUE IDs:
+ALWAYS add unique id attributes to ALL interactive and dynamic elements.
+This is REQUIRED for the patch system to work correctly.
+
+CRITICAL - JSON IN ATTRIBUTES:
+Use &quot; for quotes inside data-action-data attribute values.
+
+CRITICAL - ESCAPE HATCH:
+ALWAYS include a prompt input (id="prompt") with a "Generate" button (data-action="generate") in a fixed footer.
+
+ICONS:
+Use Iconify: <iconify-icon icon="mdi:home"></iconify-icon>
+Popular sets: mdi, lucide, tabler, ph
+
+FONTS:
+Use any Google Font by name (loaded on-demand from Fontsource CDN):
+Example: style="font-family: 'Space Grotesk', sans-serif"
+Stick to Inter unless a specific aesthetic is requested.
+
+Design: Light mode (#fafafa background, #0a0a0a text), minimal brutalist UI, generous whitespace.
+
+Output ONLY the JSON object, nothing else.`;
+
+export type UnifiedGenerateOptions = {
+  currentHtml?: string;
+  prompt?: string;
+  action?: string;
+  actionData?: Record<string, unknown>;
+};
 
 export class GenerateService extends Effect.Service<GenerateService>()(
   "GenerateService",
@@ -393,7 +494,119 @@ export class GenerateService extends Effect.Service<GenerateService>()(
           return effectStream;
         });
 
-      return { generateFullHtml, generatePatches, streamPatches };
+      const streamUnified = (
+        options: UnifiedGenerateOptions
+      ): Effect.Effect<Stream.Stream<UnifiedResponse, Error>, Error> =>
+        Effect.gen(function* () {
+          yield* Effect.log("Streaming unified response", {
+            action: options.action,
+            prompt: options.prompt,
+            hasCurrentHtml: !!options.currentHtml,
+          });
+
+          const { currentHtml, prompt, action, actionData } = options;
+
+          // Build user message parts
+          const contextPart = currentHtml
+            ? `CURRENT HTML:\n${currentHtml}`
+            : "NO CURRENT HTML - this is an initial page generation. You MUST use full mode.";
+
+          const actionPart = action
+            ? `ACTION TRIGGERED: ${action}\nACTION DATA: ${JSON.stringify(actionData, null, 0)}`
+            : null;
+
+          const promptPart = prompt ? `USER REQUEST: ${prompt}` : null;
+
+          const defaultPart =
+            !currentHtml && !prompt && !action
+              ? `Generate an initial welcome page for this generative UI system with:
+1. Welcome message explaining this is a generative UI system
+2. Input field for describing changes
+3. "Generate" button with data-action="generate"
+4. Cyber-minimalist design (monochromatic, clean lines, lots of whitespace)`
+              : null;
+
+          const userMessage = [contextPart, actionPart, promptPart, defaultPart]
+            .filter((p): p is string => p !== null)
+            .join("\n\n");
+
+          const messages = [
+            { role: "system" as const, content: UNIFIED_SYSTEM_PROMPT },
+            { role: "user" as const, content: userMessage },
+          ];
+
+          const result = streamObject({
+            model: llm.provider.languageModel("openai/gpt-oss-20b"),
+            messages,
+            schema: UnifiedResponseSchema,
+            mode: "json",
+          });
+
+          // Partial schemas for streaming validation
+          const PartialPatchesSchema = z.object({
+            mode: z.literal("patches"),
+            patches: z.array(z.unknown()),
+          });
+
+          const FullHtmlSchema = z.object({
+            mode: z.literal("full"),
+            html: z.string(),
+          });
+
+          let emittedPatchCount = 0;
+          let emittedFull = false;
+
+          const effectStream = Stream.fromAsyncIterable(
+            result.partialObjectStream,
+            (error) =>
+              error instanceof Error
+                ? error
+                : new Error(`Stream error: ${String(error)}`)
+          ).pipe(
+            Stream.mapConcatEffect((partial) =>
+              Effect.gen(function* () {
+                // Try parsing as patches mode
+                const patchesResult = PartialPatchesSchema.safeParse(partial);
+                if (patchesResult.success) {
+                  const newPatches = patchesResult.data.patches.slice(emittedPatchCount);
+                  const validatedPatches = yield* pipe(
+                    newPatches,
+                    Effect.forEach((p) =>
+                      Effect.sync(() => PatchSchema.safeParse(p))
+                    ),
+                    Effect.map((results) =>
+                      results
+                        .filter((r) => r.success)
+                        .map((r) => r.data as Patch)
+                    )
+                  );
+
+                  emittedPatchCount += validatedPatches.length;
+
+                  return validatedPatches.map(
+                    (patch): UnifiedResponse => ({
+                      mode: "patches",
+                      patches: [patch],
+                    })
+                  );
+                }
+
+                // Try parsing as full HTML mode
+                const fullResult = FullHtmlSchema.safeParse(partial);
+                if (fullResult.success && !emittedFull) {
+                  emittedFull = true;
+                  return [fullResult.data];
+                }
+
+                return [];
+              })
+            )
+          );
+
+          return effectStream;
+        });
+
+      return { generateFullHtml, generatePatches, streamPatches, streamUnified };
     }),
   }
 ) {}

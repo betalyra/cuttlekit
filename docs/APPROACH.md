@@ -252,6 +252,77 @@ Icons inherit text color via currentColor.
 
 ---
 
+## Step 16: On-Demand Fonts with Fontsource
+
+**Problem:** AI-generated UIs use system fonts only. Custom fonts would improve aesthetics, but bundling fonts bloats the frontend.
+
+**Solution:** Dynamic font loading using Fontsource API for metadata and jsDelivr CDN for font files.
+
+**How it works:**
+1. AI generates HTML with `font-family: 'Space Grotesk', sans-serif`
+2. Frontend parses HTML string for font-family declarations (regex, not DOM traversal)
+3. For each custom font, fetch metadata from Fontsource API (cached)
+4. Load font via FontFace API from jsDelivr CDN
+5. Browser re-renders with loaded font
+
+**Key implementation details:**
+- `extractFontsFromHTML(html)` - Fast regex parsing, no DOM traversal needed
+- Uses `defSubset` from API - works with any language (Latin, CJK, Arabic, etc.)
+- Prefers variable fonts when available (single file for all weights)
+- Graceful fallback - unknown fonts show system font
+
+**Font loading for patches:**
+- `extractPatchContent(patch)` extracts content from html/append/prepend/style patches
+- `applyPatch()` calls `loadFontsFromHTML()` for any patch with font content
+
+**Trade-offs:**
+- Brief FOUT (~50-100ms) while font loads
+- Extra API call on first use of each font
+- Relies on Fontsource API availability
+- Access to 1500+ open-source fonts without bundling
+
+**Result:** AI can now specify any Google Font or open-source font by name. UIs look polished with proper typography.
+
+---
+
+## Step 17: Unified Response Schema (AI Decides Mode)
+
+**Problem:** Hardcoded routing logic decided when to use patches vs full HTML based on action type. This was inflexible and didn't account for context.
+
+**Previous logic:**
+```typescript
+const shouldGenerateFullHtml = !currentHtml || prompt || isGenerateAction || isResetAction;
+```
+
+**Solution:** Let the AI decide the mode via a unified response schema.
+
+**Unified schema:**
+```typescript
+const UnifiedResponseSchema = z.union([
+  z.object({ mode: z.literal("patches"), patches: PatchArraySchema }),
+  z.object({ mode: z.literal("full"), html: z.string() }),
+]);
+```
+
+**Single system prompt** explains both modes and when to use each:
+- **Patches** for: counter increments, checkbox toggles, adding/removing items, style changes
+- **Full HTML** for: initial generation, major redesigns, when most of the page changes
+
+**Key changes:**
+1. **GenerateService:** New `streamUnified()` function streams either patches or full HTML
+2. **UIService:** Simplified `generateStream()` - just passes request to AI, handles response
+3. **No hardcoded routing** - AI understands context better than rules
+
+**Benefits:**
+- More generic - works for any use case from single-letter font change to full redesign
+- AI can batch related style changes in one html patch on a container
+- Simpler codebase - removed conditional logic
+- Future-proof - AI adapts to new patterns without code changes
+
+**Result:** The system is now fully generic. AI chooses the optimal update strategy based on the actual request context.
+
+---
+
 ## Key Takeaways
 
 1. **Plain HTML over JSX** - AI can steer a responsive frontend by generating plain HTML

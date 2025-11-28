@@ -1,4 +1,5 @@
 import "./style.css"
+import { loadFontsFromHTML } from "./fonts"
 
 type GenerateRequest = {
   type: "generate"
@@ -73,12 +74,27 @@ const app = {
     }
   },
 
+  // Extract HTML content from a patch for font loading
+  extractPatchContent(patch: Patch): string | null {
+    if ("html" in patch) return patch.html
+    if ("append" in patch) return patch.append
+    if ("prepend" in patch) return patch.prepend
+    if ("attr" in patch && patch.attr.style) return patch.attr.style
+    return null
+  },
+
   // Apply a single patch to the DOM
   applyPatch(patch: Patch) {
     const el = document.querySelector(patch.selector)
     if (!el) {
       console.warn(`Patch target not found: ${patch.selector}`)
       return
+    }
+
+    // Load fonts from patch content
+    const content = this.extractPatchContent(patch)
+    if (content) {
+      loadFontsFromHTML(content)
     }
 
     if ("text" in patch) {
@@ -112,9 +128,11 @@ const app = {
         break
       case "html":
         this.getElements().contentEl.innerHTML = event.html
+        loadFontsFromHTML(event.html)
         break
       case "done":
         // Final state - stream complete
+        loadFontsFromHTML(event.html)
         break
     }
   },
@@ -223,6 +241,7 @@ const app = {
 
       if (data.type === "full-page" && data.html) {
         this.getElements().contentEl.innerHTML = data.html
+        loadFontsFromHTML(data.html)
       }
     } catch (err) {
       this.setError(err instanceof Error ? err.message : String(err))
