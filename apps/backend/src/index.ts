@@ -9,7 +9,7 @@ import {
   HttpServerResponse,
 } from "@effect/platform";
 import { NodeHttpServer, NodeRuntime } from "@effect/platform-node";
-import { Config, Effect, Layer, Schema, Stream } from "effect";
+import { Config, Effect, Layer, Logger, LogLevel, Schema, Stream } from "effect";
 import { createServer } from "node:http";
 import { GenerateService } from "./services/generate.js";
 import { GoogleService, GroqService } from "./services/llm.js";
@@ -153,7 +153,8 @@ const HttpLive = HttpApiBuilder.serve(HttpMiddleware.logger).pipe(
   Layer.provide(HttpApiBuilder.middlewareCors()),
   Layer.provide(ApiLive),
   HttpServer.withLogAddress,
-  Layer.provide(NodeHttpServer.layer(createServer, { port: 34512 }))
+  Layer.provide(NodeHttpServer.layer(createServer, { port: 34512 })),
+  Layer.provide(Logger.minimumLogLevel(LogLevel.Debug))
 );
 
 Layer.launch(HttpLive).pipe(NodeRuntime.runMain);

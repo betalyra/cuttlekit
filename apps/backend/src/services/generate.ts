@@ -1,4 +1,4 @@
-import { Effect, Stream } from "effect";
+import { Effect, Stream, pipe } from "effect";
 import { generateText, streamObject, ModelMessage, TextPart } from "ai";
 import { z } from "zod";
 import { LlmProvider } from "./llm.js";
@@ -325,20 +325,54 @@ export class GenerateService extends Effect.Service<GenerateService>()(
                 ? error
                 : new Error(`Stream error: ${String(error)}`)
           ).pipe(
-            Stream.mapConcat((partialArray) => {
-              // partialArray is the array as it's being built
-              // Emit only new patches that we haven't emitted yet
-              if (!partialArray || !Array.isArray(partialArray)) {
-                return [];
-              }
-              const newPatches = partialArray.slice(emittedCount);
-              emittedCount = partialArray.length;
-              // Only emit complete patches (validated by Zod schema)
-              return newPatches.flatMap((p) => {
-                const result = PatchSchema.safeParse(p);
-                return result.success ? [result.data] : [];
-              });
-            })
+            Stream.mapConcatEffect((partialArray) =>
+              Effect.gen(function* () {
+                yield* Effect.logDebug("[streamPatches] Received partial", {
+                  isArray: Array.isArray(partialArray),
+                  length: Array.isArray(partialArray) ? partialArray.length : 0,
+                  emittedCount,
+                  raw: JSON.stringify(partialArray)?.slice(0, 200),
+                });
+
+                if (!partialArray) {
+                  return [];
+                }
+
+                // Handle both array and single object responses
+                const patchArray = Array.isArray(partialArray)
+                  ? partialArray
+                  : [partialArray];
+                const newPatches = patchArray.slice(emittedCount);
+                emittedCount = patchArray.length;
+
+                const validPatches = yield* pipe(
+                  newPatches,
+                  Effect.forEach((p) =>
+                    Effect.gen(function* () {
+                      const result = PatchSchema.safeParse(p);
+                      if (!result.success) {
+                        yield* Effect.logDebug("[streamPatches] Invalid patch", {
+                          patch: p,
+                          error: result.error.message,
+                        });
+                        return null;
+                      }
+                      return result.data as Patch;
+                    })
+                  ),
+                  Effect.map((results: (Patch | null)[]) =>
+                    results.filter((p): p is Patch => p !== null)
+                  )
+                );
+
+                if (validPatches.length > 0) {
+                  yield* Effect.logDebug("[streamPatches] Emitting patches", {
+                    patches: validPatches,
+                  });
+                }
+                return validPatches;
+              })
+            )
           );
 
           return effectStream;
