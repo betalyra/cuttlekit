@@ -60,6 +60,9 @@ importers:
 
   apps/backend:
     dependencies:
+      '@ai-sdk/provider':
+        specifier: 3.0.0-beta.20
+        version: 3.0.0-beta.20
       '@betalyra/generative-ui-common':
         specifier: workspace:*
         version: link:../../packages/common
@@ -126,6 +129,10 @@ packages:
 
   '@ai-sdk/provider@3.0.0-beta.17':
     resolution: {integrity: sha512-1Jek+B4W/8KV48Lcsnl7QBXD22fmwDISz//JRGtPRjexrwr2bSeFJ3yqWpvQo6CYttac9GYf3MTiho4iSl+V2A==}
+    engines: {node: '>=18'}
+
+  '@ai-sdk/provider@3.0.0-beta.20':
+    resolution: {integrity: sha512-+JqXbqHHtucRsMFGidygRyftpjX1GD2r4cG3Sh2URZ6g8IaN8k4loXNh2gX92dd4YjlYYn3eTHp3R8dDJfX25Q==}
     engines: {node: '>=18'}
 
   '@babel/generator@7.28.5':
@@ -1333,6 +1340,10 @@ snapshots:
       json-schema: 0.4.0
 
   '@ai-sdk/provider@3.0.0-beta.17':
+    dependencies:
+      json-schema: 0.4.0
+
+  '@ai-sdk/provider@3.0.0-beta.20':
     dependencies:
       json-schema: 0.4.0
 

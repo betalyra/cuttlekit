@@ -1,17 +1,19 @@
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createGroq } from "@ai-sdk/groq";
+import { ProviderV2 } from "@ai-sdk/provider";
 import { Config, Context, Effect, Layer, Redacted } from "effect";
-import type { LanguageModel } from "ai";
 
-export class LlmService extends Context.Tag("LlmService")<
-  LlmService,
-  {
-    readonly model: LanguageModel;
-  }
+export type ILlmProvider = {
+  provider: ProviderV2;
+};
+
+export class LlmProvider extends Context.Tag("LlmProvider")<
+  LlmProvider,
+  ILlmProvider
 >() {}
 
-export const GoogleServiceLive = Layer.effect(
-  LlmService,
+export const GoogleService = Layer.effect(
+  LlmProvider,
   Effect.gen(function* () {
     const apiKey = yield* Config.redacted("GOOGLE_API_KEY");
 
@@ -19,30 +21,18 @@ export const GoogleServiceLive = Layer.effect(
       apiKey: Redacted.value(apiKey),
     });
 
-    const model = google("gemini-2.5-flash-lite");
-
-    return {
-      model,
-    };
+    return { provider: google };
   })
 );
 
-export const GroqServiceLive = Layer.effect(
-  LlmService,
+export const GroqService = Layer.effect(
+  LlmProvider,
   Effect.gen(function* () {
     const apiKey = yield* Config.redacted("GROQ_API_KEY");
 
     const groq = createGroq({
       apiKey: Redacted.value(apiKey),
     });
-
-    const model = groq("openai/gpt-oss-20b");
-
-    return {
-      model,
-    };
+    return { provider: groq };
   })
 );
-
-// Default export for convenience
-export const LlmServiceLive = GroqServiceLive;

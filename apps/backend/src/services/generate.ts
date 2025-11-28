@@ -1,6 +1,6 @@
 import { Effect } from "effect";
-import { generateText } from "ai";
-import { LlmService } from "./llm.js";
+import { generateText, ModelMessage, TextPart } from "ai";
+import { GroqService, LlmProvider } from "./llm.js";
 import type { ConversationMessage } from "./session.js";
 import type { Patch } from "./vdom.js";
 
@@ -102,7 +102,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
   {
     accessors: true,
     effect: Effect.gen(function* () {
-      const llm = yield* LlmService;
+      const llm = yield* LlmProvider;
 
       const generateFullHtml = (options: GenerateOptions) =>
         Effect.gen(function* () {
@@ -111,43 +111,49 @@ export class GenerateService extends Effect.Service<GenerateService>()(
           const { prompt, action, actionData, currentHtml } = options;
 
           // Build user message with dynamic content
-          const userMessageParts: string[] = [];
+          const userMessageParts: TextPart[] = [];
 
           if (currentHtml) {
-            userMessageParts.push(
-              `CURRENT UI STATE:\n${currentHtml}\n\nIMPORTANT: Preserve the existing design, layout, colors, and style. Only make changes that are explicitly requested.`
-            );
+            userMessageParts.push({
+              type: "text",
+              text: `CURRENT UI STATE:\n${currentHtml}\n\nIMPORTANT: Preserve the existing design, layout, colors, and style. Only make changes that are explicitly requested.`,
+            });
           }
 
           if (action) {
-            userMessageParts.push(
-              `ACTION TRIGGERED: ${action}\nAction Data: ${JSON.stringify(
+            userMessageParts.push({
+              type: "text",
+              text: `ACTION TRIGGERED: ${action}\nAction Data: ${JSON.stringify(
                 actionData,
                 null,
                 0
-              )}\n\nThe user clicked a button with data-action="${action}". Generate the COMPLETE page with the updated state.`
-            );
+              )}\n\nThe user clicked a button with data-action="${action}". Generate the COMPLETE page with the updated state.`,
+            });
           } else if (prompt) {
-            userMessageParts.push(
-              `USER REQUEST: ${prompt}\n\nGenerate an interface based on this request.`
-            );
+            userMessageParts.push({
+              type: "text",
+              text: `USER REQUEST: ${prompt}\n\nGenerate an interface based on this request.`,
+            });
           } else {
-            userMessageParts.push(`Generate an initial welcome page for this generative UI system with:
+            userMessageParts.push({
+              type: "text",
+              text: `Generate an initial welcome page for this generative UI system with:
 1. Welcome message explaining this is a generative UI system
 2. Input field for describing changes
 3. "Generate" button with data-action="generate"
-4. Cyber-minimalist design (monochromatic, clean lines, lots of whitespace)`);
+4. Cyber-minimalist design (monochromatic, clean lines, lots of whitespace)`,
+            });
           }
 
-          const messages = [
+          const messages: ModelMessage[] = [
             { role: "system" as const, content: FULL_HTML_SYSTEM_PROMPT },
-            { role: "user" as const, content: userMessageParts.join("\n\n") },
+            { role: "user" as const, content: userMessageParts },
           ];
 
           const result = yield* Effect.tryPromise({
             try: () =>
               generateText({
-                model: llm.model,
+                model: llm.provider.languageModel("openai/gpt-oss-20b"),
                 messages,
               }),
             catch: (error) => {
@@ -202,7 +208,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
           const result = yield* Effect.tryPromise({
             try: () =>
               generateText({
-                model: llm.model,
+                model: llm.provider.languageModel("openai/gpt-oss-20b"),
                 messages,
               }),
             catch: (error) => {

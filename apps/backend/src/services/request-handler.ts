@@ -1,213 +1,72 @@
-import { Effect } from "effect"
-import { GenerateService } from "./generate.js"
-import { SessionService } from "./session.js"
-import { VdomService } from "./vdom.js"
-import type { Request, Response } from "../types/messages.js"
+import { Effect } from "effect";
+import { UIService } from "./ui.js";
+import type { Request, Response } from "../types/messages.js";
 
-const MAX_PATCH_RETRIES = 2
-
+/**
+ * RequestHandlerService - HTTP request/response mapping layer
+ *
+ * Converts HTTP API types to domain types and back.
+ * All business logic lives in UIService.
+ */
 export class RequestHandlerService extends Effect.Service<RequestHandlerService>()(
   "RequestHandlerService",
   {
     accessors: true,
     effect: Effect.gen(function* () {
-      const generateService = yield* GenerateService
-      const sessionService = yield* SessionService
-      const vdomService = yield* VdomService
+      const uiService = yield* UIService;
 
       const handleRequest = (request: Request): Effect.Effect<Response, Error> =>
         Effect.gen(function* () {
-          // Get or create session ID
-          const sessionId = request.sessionId || (yield* sessionService.generateSessionId())
-
-          // Get current VDOM HTML (null if new session)
-          // Fall back to client-provided HTML if server doesn't have VDOM (e.g., after restart)
-          const serverHtml = yield* vdomService.getHtml(sessionId)
-          const currentHtml = serverHtml ?? (request.type === "generate" ? request.currentHtml : undefined) ?? null
-
-          // If client provided HTML but server didn't have it, restore the VDOM
-          if (!serverHtml && currentHtml) {
-            yield* vdomService.setHtml(sessionId, currentHtml)
-          }
-
-          // Note: History is recorded but not sent to LLM (quick win optimization)
-          // Future: Will implement rolling summary for context
-
-          // Handle based on request type
           if (request.type === "generate") {
-            // Extract prompt from request or actionData (for "generate" action with prompt input)
-            const prompt = request.prompt || (request.actionData?.prompt as string | undefined)
-
-            yield* Effect.log("Request details", {
+            const result = yield* uiService.generate({
+              sessionId: request.sessionId,
+              currentHtml: request.currentHtml,
+              prompt: request.prompt,
               action: request.action,
-              prompt,
-              hasCurrentHtml: !!currentHtml,
               actionData: request.actionData,
-            })
+            });
 
-            // Handle "reset" action - clear VDOM and start fresh
-            if (request.action === "reset") {
-              yield* vdomService.deleteSession(sessionId)
-              yield* Effect.log("Session reset, generating fresh UI")
-            }
-
-            // Case 1: No VDOM yet, explicit prompt, "generate" action, or "reset" action → generate full HTML
-            const isGenerateAction = request.action === "generate"
-            const isResetAction = request.action === "reset"
-            const shouldGenerateFullHtml = !currentHtml || prompt || isGenerateAction || isResetAction
-
-            if (shouldGenerateFullHtml) {
-              yield* Effect.log("Generating full HTML", { reason: !currentHtml ? "no vdom" : prompt ? "has prompt" : "generate action" })
-
-              // Add user message to history
-              if (prompt) {
-                yield* sessionService.addMessage(sessionId, {
-                  role: "user",
-                  content: prompt,
-                  timestamp: Date.now(),
-                })
-              }
-
-              // Don't send history to LLM - current HTML is the state
-              // History is recorded for future rolling summary feature
-              // Pass currentHtml when modifying existing UI (not on reset)
-              const html = yield* generateService.generateFullHtml({
-                prompt,
-                // history omitted - will use rolling summary in future
-                action: request.action,
-                actionData: request.actionData,
-                currentHtml: isResetAction ? undefined : currentHtml ?? undefined,
-              })
-
-              // Store in VDOM
-              yield* vdomService.setHtml(sessionId, html)
-
-              // Add to history
-              yield* sessionService.addMessage(sessionId, {
-                role: "assistant",
-                content: `[Generated UI: ${html.slice(0, 100)}...]`,
-                timestamp: Date.now(),
-              })
-
-              return { type: "full-page" as const, html, sessionId }
-            }
-
-            // Case 2: VDOM exists and action triggered → generate patches
-            if (request.action) {
-              yield* Effect.log("Generating patches for action", { action: request.action })
-
-              // Add action to history
-              yield* sessionService.addMessage(sessionId, {
-                role: "user",
-                content: `[Action: ${request.action}] ${JSON.stringify(request.actionData || {})}`,
-                timestamp: Date.now(),
-              })
-
-              // Try patch generation with retries
-              let lastErrors: string[] = []
-
-              for (let attempt = 0; attempt <= MAX_PATCH_RETRIES; attempt++) {
-                yield* Effect.log(`Patch attempt ${attempt + 1}/${MAX_PATCH_RETRIES + 1}`)
-
-                const patches = yield* generateService.generatePatches({
-                  currentHtml,
-                  action: request.action,
-                  actionData: request.actionData,
-                  previousErrors: lastErrors,
-                })
-
-                yield* Effect.log("Generated patches", { count: patches.length })
-
-                const result = yield* vdomService.applyPatches(sessionId, patches)
-
-                if (result.errors.length === 0) {
-                  yield* Effect.log("Patches applied successfully")
-
-                  // Add to history
-                  yield* sessionService.addMessage(sessionId, {
-                    role: "assistant",
-                    content: `[Applied ${result.applied} patches]`,
-                    timestamp: Date.now(),
-                  })
-
-                  return { type: "full-page" as const, html: result.html, sessionId }
-                }
-
-                yield* Effect.log("Patch errors, will retry", { errors: result.errors })
-                lastErrors = result.errors
-              }
-
-              // Fallback: regenerate full HTML
-              yield* Effect.log("Patch retries exhausted, falling back to full HTML generation")
-
-              const html = yield* generateService.generateFullHtml({
-                // history omitted - will use rolling summary in future
-                action: request.action,
-                actionData: request.actionData,
-                currentHtml,
-              })
-
-              yield* vdomService.setHtml(sessionId, html)
-
-              yield* sessionService.addMessage(sessionId, {
-                role: "assistant",
-                content: `[Fallback: regenerated full UI]`,
-                timestamp: Date.now(),
-              })
-
-              return { type: "full-page" as const, html, sessionId }
-            }
-
-            // Case 3: No action, just return current HTML
-            return { type: "full-page" as const, html: currentHtml, sessionId }
+            return {
+              type: "full-page" as const,
+              html: result.html,
+              sessionId: result.sessionId,
+            };
           }
 
-          // Handle chat/update requests (keep simple for now)
           if (request.type === "chat") {
-            yield* sessionService.addMessage(sessionId, {
-              role: "user",
-              content: request.message,
-              timestamp: Date.now(),
-            })
-
-            const response = yield* generateService.generateFullHtml({
+            // Chat requests use generate with prompt
+            const result = yield* uiService.generate({
+              sessionId: request.sessionId,
               prompt: request.message,
-              // history omitted - will use rolling summary in future
-              currentHtml: currentHtml ?? undefined,
-            })
+            });
 
-            yield* sessionService.addMessage(sessionId, {
-              role: "assistant",
-              content: response,
-              timestamp: Date.now(),
-            })
-
-            return { type: "message" as const, message: response, sessionId }
+            return {
+              type: "message" as const,
+              message: result.html,
+              sessionId: result.sessionId,
+            };
           }
 
           // Update request
-          yield* sessionService.addMessage(sessionId, {
-            role: "user",
-            content: request.prompt,
-            timestamp: Date.now(),
-          })
-
-          const html = yield* generateService.generateFullHtml({
+          const result = yield* uiService.generate({
+            sessionId: request.sessionId,
             prompt: request.prompt,
-            // history omitted - will use rolling summary in future
-            currentHtml: currentHtml ?? undefined,
-          })
-
-          yield* vdomService.setHtml(sessionId, html)
+          });
 
           return {
             type: "partial-update" as const,
-            operations: [{ action: "replace" as const, selector: request.target || "#app", html }],
-            sessionId,
-          }
-        })
+            operations: [
+              {
+                action: "replace" as const,
+                selector: request.target || "#app",
+                html: result.html,
+              },
+            ],
+            sessionId: result.sessionId,
+          };
+        });
 
-      return { handleRequest }
+      return { handleRequest };
     }),
   }
 ) {}
