@@ -1,3 +1,15 @@
+## Approach Log
+
+When making significant changes to the architecture or solving notable problems, document them in `docs/APPROACH.md`:
+- Add a new numbered step (e.g., "## Step 12: ...")
+- Focus on the **problem** that motivated the change
+- Describe the **solution** at a high level
+- Note any **trade-offs** or **results**
+- Keep it concise - bullet points preferred
+- Update "Key Takeaways" if a fundamental insight was gained
+
+---
+
 Use functional programming style using effect-ts.
 When doing array operations, use effects Array for mapping, folding, etc.
 When running multiple effects on an array, use the Effect.forEach pattern:

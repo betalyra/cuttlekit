@@ -125,10 +125,52 @@ A chronological journey building an AI-powered generative UI system.
 
 ---
 
+## Step 11: Server-Side VDOM Integration
+
+**Problem:** Full page regeneration on every click is slow and expensive. AI has to regenerate entire HTML even for small changes like incrementing a counter.
+
+**Solution:** Server-side DOM with patch-based updates.
+
+**Key changes:**
+- Server maintains a DOM per session using happy-dom (headless browser environment)
+- AI can generate either full HTML (for new UIs) or small CSS-selector patches (for updates)
+- Patches are simpler: `{ selector: "#counter", text: "6" }` instead of full HTML
+- If patches fail (selector not found), retry with error context, then fall back to full regeneration
+
+**Resilience:**
+- Frontend sends current HTML with each request
+- If server restarts, it recovers state from client
+- No session loss on server restart
+
+**Dropped Alpine.js:**
+- Frontend is now vanilla TypeScript
+- Simpler, no framework dependency
+- Same event delegation pattern (data-action clicks)
+
+**Result:** Counter increments now use ~50 tokens (patch) instead of ~500 tokens (full HTML). Faster responses.
+
+---
+
+## Step 12: Drop Conversation History
+
+**Problem:** Still sending full conversation history to LLM on every request. Tokens add up, context window fills.
+
+**Insight:** The current HTML already contains all state. Why send history?
+
+**Solution:**
+- History is still recorded (for potential future features like rolling summary)
+- But NOT sent to LLM - only the current HTML is sent
+- Current HTML IS the state - AI can see exactly what the user sees
+
+**Result:** Dramatically reduced token usage per request. Simpler mental model.
+
+---
+
 ## Key Takeaways
 
-1. **Alpine over React** - AI can steer a responsive frontend by generating plain HTML
+1. **Plain HTML over JSX** - AI can steer a responsive frontend by generating plain HTML
 2. **Server-side actions** - Solved the x-html security limitation elegantly
 3. **Single endpoint** - One `/generate` route handles both prompts and actions
-4. **State lives in conversation** - AI parses its own previous output to understand current state
-5. **Trade-offs remain** - Token usage and update efficiency are unsolved at scale
+4. **Current HTML is the state** - No need to maintain separate state or conversation history
+5. **Patches over full regeneration** - Small updates are fast and cheap
+6. **Graceful degradation** - Patch failures automatically fall back to full regeneration
