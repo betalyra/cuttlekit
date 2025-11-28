@@ -29,4 +29,29 @@ Then open http://localhost:5173
 
 ## How it works
 
-See [architecture.md](architecture.md)
+See [docs/APPROACH.md](docs/APPROACH.md) for the development journey and key decisions.
+
+---
+
+## Roadmap / Ideas to Explore
+
+### Measurement First
+- **Test harness for performance** - Can't improve what we can't measure. Need baseline latency, token usage, and perceived speed metrics before optimizing.
+
+### Perceived Speed
+- **Stream HTML to frontend** - Show content as it generates instead of waiting for completion. First token in ~100ms vs full response in ~500ms.
+
+### Context Management
+- **Re-add conversation history with aggressive compaction** - Current HTML alone loses nuance. Implement rolling summaries: recent turns verbatim, older turns compressed to structured bullet points. See [docs/COMPACTION.md](docs/COMPACTION.md).
+
+### Multi-Page Support
+- **Backend-managed page state** - Current approach assumes single page. Need to store/switch between pages server-side while maintaining session continuity.
+
+### Speculative Execution
+- **Pre-generate on hover** - Start generating before user clicks. If hover→click takes 200ms and generation takes 200ms, click feels instant. See [docs/PERFORMANCE.md](docs/PERFORMANCE.md) for more techniques.
+
+### Tool Integration
+- **MCP support** - Add Model Context Protocol so AI can use external tools (databases, APIs, file systems) when building UIs.
+
+### Hybrid AI Architecture
+- **Browser-side AI for minor updates** - Use lightweight models (Chrome's Gemini Nano) for simple operations locally. Server generates templates, browser AI fills them in. Zero latency for cached actions.
