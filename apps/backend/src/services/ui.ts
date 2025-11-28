@@ -1,7 +1,7 @@
-import { Effect } from "effect";
+import { Effect, Stream } from "effect";
 import { GenerateService } from "./generate.js";
 import { SessionService } from "./session.js";
-import { VdomService } from "./vdom.js";
+import { VdomService, type Patch } from "./vdom.js";
 
 const MAX_PATCH_RETRIES = 2;
 
@@ -225,6 +225,123 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
         return { html: currentHtml!, sessionId };
       });
 
-    return { generate, resolveSession, generateFullPage, applyPatches };
+    // Streaming event types
+    type StreamEvent =
+      | { type: "session"; sessionId: string }
+      | { type: "patch"; patch: Patch }
+      | { type: "html"; html: string }
+      | { type: "done"; html: string };
+
+    const generateStream = (
+      request: UIRequest
+    ): Effect.Effect<Stream.Stream<StreamEvent, Error>, Error> =>
+      Effect.gen(function* () {
+        const { sessionId, currentHtml } = yield* resolveSession(request);
+        const prompt =
+          request.prompt || (request.actionData?.prompt as string | undefined);
+
+        yield* Effect.log("UIService.generateStream", {
+          action: request.action,
+          prompt,
+          hasCurrentHtml: !!currentHtml,
+        });
+
+        // Handle "reset" action
+        if (request.action === "reset") {
+          yield* vdomService.deleteSession(sessionId);
+          yield* Effect.log("Session reset, generating fresh UI");
+        }
+
+        // Determine if we need full HTML or can use patches
+        const isGenerateAction = request.action === "generate";
+        const isResetAction = request.action === "reset";
+        const shouldGenerateFullHtml =
+          !currentHtml || prompt || isGenerateAction || isResetAction;
+
+        if (shouldGenerateFullHtml) {
+          // For full HTML generation, we don't stream (yet) - return single event
+          yield* Effect.log("Generating full HTML (non-streaming)");
+
+          const html = yield* generateFullPage(sessionId, {
+            prompt,
+            action: request.action,
+            actionData: request.actionData,
+            currentHtml,
+            isReset: isResetAction,
+          });
+
+          return Stream.make(
+            { type: "session" as const, sessionId },
+            { type: "html" as const, html },
+            { type: "done" as const, html }
+          );
+        }
+
+        // Stream patches for actions
+        if (request.action && currentHtml) {
+          yield* Effect.log("Streaming patches for action", {
+            action: request.action,
+          });
+
+          // Add action to history
+          yield* sessionService.addMessage(sessionId, {
+            role: "user",
+            content: `[Action: ${request.action}] ${JSON.stringify(request.actionData || {})}`,
+            timestamp: Date.now(),
+          });
+
+          // Get the patch stream from GenerateService
+          const patchStream = yield* generateService.streamPatches({
+            currentHtml,
+            action: request.action,
+            actionData: request.actionData,
+          });
+
+          // Start with session event, then stream patches
+          const sessionEvent = Stream.make({ type: "session" as const, sessionId });
+
+          // Apply each patch to VDOM and emit
+          const patchEvents = patchStream.pipe(
+            Stream.mapEffect((patch) =>
+              Effect.gen(function* () {
+                // Apply patch to VDOM
+                const result = yield* vdomService.applyPatches(sessionId, [patch]);
+                if (result.errors.length > 0) {
+                  yield* Effect.log("Patch error", { error: result.errors[0] });
+                }
+                return { type: "patch" as const, patch };
+              })
+            )
+          );
+
+          // End with done event containing final HTML
+          const doneEvent = Stream.fromEffect(
+            Effect.gen(function* () {
+              const finalHtml = yield* vdomService.getHtml(sessionId);
+
+              yield* sessionService.addMessage(sessionId, {
+                role: "assistant",
+                content: `[Streamed patches]`,
+                timestamp: Date.now(),
+              });
+
+              return { type: "done" as const, html: finalHtml || currentHtml };
+            })
+          );
+
+          return Stream.concat(sessionEvent, Stream.concat(patchEvents, doneEvent));
+        }
+
+        // No action, return current HTML
+        return Stream.make(
+          { type: "session" as const, sessionId },
+          { type: "html" as const, html: currentHtml! },
+          { type: "done" as const, html: currentHtml! }
+        );
+      });
+
+    return { generate, generateStream, resolveSession, generateFullPage, applyPatches };
   }),
 }) {}
+
+export type { Patch };

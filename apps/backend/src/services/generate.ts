@@ -1,8 +1,24 @@
-import { Effect } from "effect";
-import { generateText, ModelMessage, TextPart } from "ai";
-import { GroqService, LlmProvider } from "./llm.js";
+import { Effect, Stream } from "effect";
+import { generateText, streamObject, ModelMessage, TextPart } from "ai";
+import { z } from "zod";
+import { LlmProvider } from "./llm.js";
 import type { ConversationMessage } from "./session.js";
 import type { Patch } from "./vdom.js";
+
+// Zod schema for patches - matches the Patch type
+const PatchSchema = z.union([
+  z.object({ selector: z.string(), text: z.string() }),
+  z.object({
+    selector: z.string(),
+    attr: z.record(z.string(), z.string().nullable()),
+  }),
+  z.object({ selector: z.string(), append: z.string() }),
+  z.object({ selector: z.string(), prepend: z.string() }),
+  z.object({ selector: z.string(), html: z.string() }),
+  z.object({ selector: z.string(), remove: z.literal(true) }),
+]);
+
+const PatchArraySchema = z.array(PatchSchema);
 
 export type GenerateOptions = {
   prompt?: string;
@@ -239,7 +255,82 @@ export class GenerateService extends Effect.Service<GenerateService>()(
           return patches;
         });
 
-      return { generateFullHtml, generatePatches };
+      const streamPatches = (
+        options: GeneratePatchesOptions
+      ): Effect.Effect<Stream.Stream<Patch, Error>, Error> =>
+        Effect.gen(function* () {
+          yield* Effect.log("Streaming patches", {
+            action: options.action,
+            hasErrors: options.previousErrors?.length ?? 0,
+          });
+
+          const {
+            currentHtml,
+            action,
+            actionData,
+            previousErrors = [],
+          } = options;
+
+          const userMessageParts = [
+            `CURRENT HTML:\n${currentHtml}`,
+            `ACTION TRIGGERED: ${action}\nACTION DATA: ${JSON.stringify(
+              actionData,
+              null,
+              0
+            )}`,
+          ];
+
+          if (previousErrors.length > 0) {
+            userMessageParts.push(
+              `YOUR PREVIOUS PATCHES FAILED:\n${previousErrors.join(
+                "\n"
+              )}\n\nPlease generate corrected patches. Make sure selectors match existing elements.`
+            );
+          }
+
+          const messages = [
+            { role: "system" as const, content: PATCH_SYSTEM_PROMPT },
+            { role: "user" as const, content: userMessageParts.join("\n\n") },
+          ];
+
+          const result = streamObject({
+            model: llm.provider.languageModel("openai/gpt-oss-20b"),
+            messages,
+            schema: PatchArraySchema,
+            mode: "json",
+          });
+
+          // Track which patches we've already emitted
+          let emittedCount = 0;
+
+          // Convert partial object stream to stream of individual patches
+          const effectStream = Stream.fromAsyncIterable(
+            result.partialObjectStream,
+            (error) =>
+              error instanceof Error
+                ? error
+                : new Error(`Stream error: ${String(error)}`)
+          ).pipe(
+            Stream.mapConcat((partialArray) => {
+              // partialArray is the array as it's being built
+              // Emit only new patches that we haven't emitted yet
+              if (!partialArray || !Array.isArray(partialArray)) {
+                return [];
+              }
+              const newPatches = partialArray.slice(emittedCount);
+              emittedCount = partialArray.length;
+              // Only emit complete patches (validated by Zod schema)
+              return newPatches.flatMap((p) => {
+                const result = PatchSchema.safeParse(p);
+                return result.success ? [result.data] : [];
+              });
+            })
+          );
+
+          return effectStream;
+        });
+
+      return { generateFullHtml, generatePatches, streamPatches };
     }),
   }
 ) {}

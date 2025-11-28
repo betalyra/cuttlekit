@@ -184,6 +184,41 @@ A chronological journey building an AI-powered generative UI system.
 
 ---
 
+## Step 14: Streaming Patches via SSE
+
+**Problem:** Even with patches, users wait for AI to generate all patches before seeing any update. Perceived latency is still high.
+
+**Solution:** Stream patches individually as they're generated using Server-Sent Events (SSE).
+
+**Key changes:**
+
+1. **GenerateService:** Switched from `generateText` to `streamObject` with Zod schema validation
+   - Uses `partialObjectStream` to get patches as they're parsed
+   - Emits each complete patch immediately (doesn't wait for full array)
+
+2. **UIService:** New `generateStream` method returns `Stream<StreamEvent>`
+   - Event types: `session`, `patch`, `html`, `done`
+   - Each patch is applied to server VDOM as it arrives
+   - Maintains consistency between streamed patches and server state
+
+3. **SSE Endpoint:** New `/generate/stream` POST endpoint
+   - Returns `text/event-stream` content type
+   - Each event is `event: message\ndata: {...}\n\n`
+   - Ends with `event: close\n\n`
+
+4. **Frontend:** Raw fetch with ReadableStream parsing
+   - Buffers partial SSE frames, parses complete events
+   - Applies each patch to DOM immediately via `applyPatch`
+   - Falls back to regular request for initial loads and prompts
+
+**Why raw fetch instead of EventSource?**
+- EventSource only supports GET requests
+- We need POST to send the request payload (action, sessionId, currentHtml)
+
+**Result:** UI updates appear progressively as AI generates them. Counter increments feel instant because the first patch (the only patch) arrives and applies within ~200ms.
+
+---
+
 ## Key Takeaways
 
 1. **Plain HTML over JSX** - AI can steer a responsive frontend by generating plain HTML

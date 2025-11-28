@@ -16,6 +16,22 @@ type Response = {
   sessionId: string
 }
 
+// Patch types matching backend
+type Patch =
+  | { selector: string; text: string }
+  | { selector: string; attr: Record<string, string | null> }
+  | { selector: string; append: string }
+  | { selector: string; prepend: string }
+  | { selector: string; html: string }
+  | { selector: string; remove: true }
+
+// Stream event types
+type StreamEvent =
+  | { type: "session"; sessionId: string }
+  | { type: "patch"; patch: Patch }
+  | { type: "html"; html: string }
+  | { type: "done"; html: string }
+
 const app = {
   sessionId: null as string | null,
   loading: false,
@@ -57,12 +73,134 @@ const app = {
     }
   },
 
+  // Apply a single patch to the DOM
+  applyPatch(patch: Patch) {
+    const el = document.querySelector(patch.selector)
+    if (!el) {
+      console.warn(`Patch target not found: ${patch.selector}`)
+      return
+    }
+
+    if ("text" in patch) {
+      el.textContent = patch.text
+    } else if ("attr" in patch) {
+      Object.entries(patch.attr).forEach(([key, value]) => {
+        if (value === null) {
+          el.removeAttribute(key)
+        } else {
+          el.setAttribute(key, value)
+        }
+      })
+    } else if ("append" in patch) {
+      el.insertAdjacentHTML("beforeend", patch.append)
+    } else if ("prepend" in patch) {
+      el.insertAdjacentHTML("afterbegin", patch.prepend)
+    } else if ("html" in patch) {
+      el.innerHTML = patch.html
+    } else if ("remove" in patch) {
+      el.remove()
+    }
+  },
+
+  handleStreamEvent(event: StreamEvent) {
+    switch (event.type) {
+      case "session":
+        this.sessionId = event.sessionId
+        break
+      case "patch":
+        this.applyPatch(event.patch)
+        break
+      case "html":
+        this.getElements().contentEl.innerHTML = event.html
+        break
+      case "done":
+        // Final state - stream complete
+        break
+    }
+  },
+
+  // Stream request using SSE for real-time patch updates
+  async sendStreamRequest(request: GenerateRequest) {
+    try {
+      this.setLoading(true, false)
+      this.setError(null)
+
+      const currentHtml = this.getElements().contentEl.innerHTML || undefined
+
+      const requestWithSession = {
+        ...request,
+        sessionId: this.sessionId || undefined,
+        currentHtml: currentHtml && currentHtml.trim() ? currentHtml : undefined,
+      }
+
+      const response = await fetch("http://localhost:34512/generate/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(requestWithSession),
+      })
+
+      if (!response.ok) {
+        throw new Error("Failed to start stream")
+      }
+
+      const reader = response.body?.getReader()
+      if (!reader) throw new Error("No response body")
+
+      const decoder = new TextDecoder()
+      let buffer = ""
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+
+        // Parse SSE events from buffer
+        const lines = buffer.split("\n")
+        buffer = lines.pop() || "" // Keep incomplete line in buffer
+
+        let currentEvent = ""
+        let currentData = ""
+
+        for (const line of lines) {
+          if (line.startsWith("event: ")) {
+            currentEvent = line.slice(7)
+          } else if (line.startsWith("data: ")) {
+            currentData = line.slice(6)
+          } else if (line === "" && currentEvent && currentData) {
+            // End of event - process it
+            try {
+              const event = JSON.parse(currentData) as StreamEvent
+              this.handleStreamEvent(event)
+            } catch (e) {
+              console.error("Failed to parse SSE event:", currentData)
+            }
+            currentEvent = ""
+            currentData = ""
+          }
+        }
+      }
+    } catch (err) {
+      this.setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      this.setLoading(false, false)
+    }
+  },
+
   async sendRequest(request: GenerateRequest, isInitial = false) {
+    // Use streaming for action requests (when we have existing content)
+    const hasAction = request.action && request.action !== "generate" && request.action !== "reset"
+    const hasCurrentContent = !!this.getElements().contentEl.innerHTML?.trim()
+
+    if (hasAction && hasCurrentContent && !isInitial) {
+      return this.sendStreamRequest(request)
+    }
+
+    // Fall back to regular request for initial load, prompts, and special actions
     try {
       this.setLoading(true, isInitial)
       this.setError(null)
 
-      // Include current HTML so server can preserve state even after restart
       const currentHtml = this.getElements().contentEl.innerHTML || undefined
 
       const requestWithSession = {

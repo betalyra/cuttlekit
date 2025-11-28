@@ -66,6 +66,9 @@ importers:
       '@betalyra/generative-ui-common':
         specifier: workspace:*
         version: link:../../packages/common
+      zod:
+        specifier: ^4.1.13
+        version: 4.1.13
 
   apps/webpage:
     dependencies:
