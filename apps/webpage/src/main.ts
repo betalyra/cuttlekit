@@ -148,6 +148,8 @@ const app = {
 
       const decoder = new TextDecoder()
       let buffer = ""
+      let currentEvent = ""
+      let currentData = ""
 
       while (true) {
         const { done, value } = await reader.read()
@@ -158,9 +160,6 @@ const app = {
         // Parse SSE events from buffer
         const lines = buffer.split("\n")
         buffer = lines.pop() || "" // Keep incomplete line in buffer
-
-        let currentEvent = ""
-        let currentData = ""
 
         for (const line of lines) {
           if (line.startsWith("event: ")) {
@@ -268,12 +267,24 @@ const app = {
   },
 
   init() {
-    // Click handler for data-action elements
+    // Click handler for buttons/links with data-action (not form inputs)
     document.addEventListener("click", (e) => {
-      const el = (e.target as HTMLElement).closest("[data-action]")
-      if (el) {
+      const target = e.target as HTMLElement
+      // Skip if clicking on a form input - those use the change event
+      if (target.matches("input, select, textarea")) return
+
+      const el = target.closest("[data-action]")
+      if (el && !el.matches("input, select, textarea")) {
         e.preventDefault()
         this.triggerAction(el)
+      }
+    })
+
+    // Change handler for form inputs with data-action
+    document.addEventListener("change", (e) => {
+      const target = e.target as HTMLElement
+      if (target.matches("input[data-action], select[data-action], textarea[data-action]")) {
+        this.triggerAction(target)
       }
     })
 

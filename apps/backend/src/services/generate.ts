@@ -45,15 +45,24 @@ TECHNICAL REQUIREMENTS:
 - Style with Tailwind CSS utility classes
 
 INTERACTIVITY:
-Use data-action attributes for clickable elements:
+Use data-action attributes for interactive elements:
+
+Buttons (triggered on click):
 - <button data-action="increment">+</button>
 - <button id="delete-123" data-action="delete" data-action-data="{&quot;id&quot;:&quot;123&quot;}">Delete</button>
-- All input values are automatically collected and sent with actions
+
+Form inputs (triggered on change):
+- <input type="checkbox" id="todo-1-checkbox" data-action="toggle" data-action-data="{&quot;id&quot;:&quot;1&quot;}">
+- <select id="filter" data-action="filter"><option value="all">All</option></select>
+- <input type="radio" name="priority" data-action="set-priority" data-action-data="{&quot;level&quot;:&quot;high&quot;}">
+
+All input values are automatically collected and sent with actions.
 
 CRITICAL - UNIQUE IDs:
 ALWAYS add unique id attributes to ALL interactive and dynamic elements:
-- Checkboxes: id="todo-1-checkbox", id="todo-2-checkbox"
+- List containers: id="todo-list", id="cart-items" (required for append/prepend operations)
 - List items: id="todo-1", id="todo-2"
+- Checkboxes: id="todo-1-checkbox", id="todo-2-checkbox"
 - Buttons with data: id="delete-1", id="toggle-1"
 - Any element that might be updated: id="counter-value", id="status-text"
 This is REQUIRED for the patch system to work correctly. Never rely on complex attribute selectors.
@@ -68,9 +77,12 @@ CRITICAL - ESCAPE HATCH:
 ALWAYS include a way for the user to request changes or reset. Options:
 1. A prompt input field (id="prompt") with a "Generate" button (data-action="generate") - preferred
 2. At minimum: a small "Reset" or "New" button in a corner (data-action="reset")
-This ensures the user can always escape from any UI state. Place it unobtrusively but visibly.
+This ensures the user can always escape from any UI state.
+PLACEMENT: Put the prompt input in a fixed footer at the bottom of the page (position: fixed, bottom: 0).
+Keep it minimal and unobtrusive so it doesn't interfere with the main UI content.
+Only place it elsewhere if the user explicitly requests a different layout.
 
-Design: Light mode, high-contrast monochromatic, clean geometric shapes, generous whitespace.
+Design: Light mode (#fafafa background, #0a0a0a text), minimal brutalist UI, generous whitespace, no decorative elements.
 
 Output only HTML, nothing else.`;
 
@@ -88,13 +100,15 @@ PATCH TYPES:
 
 RULES:
 1. Output ONLY a valid JSON array of patches
-2. ALWAYS use simple ID selectors like "#todo-1", "#counter-value", "#delete-btn-1"
-3. NEVER use complex attribute selectors like [data-action-data='{"id":"1"}'] - they will FAIL
-4. Keep patches minimal - only change what's needed
-5. For counters/numbers: just update the text content
-6. For lists: use append/prepend to add items, remove to delete
-7. For checkboxes: use "#todo-1-checkbox" not input[data-action="toggle"]
-8. For boolean attributes (checked, disabled): use "checked" to set, null to remove
+2. ALWAYS check the CURRENT HTML for actual element IDs - don't assume IDs exist
+3. Use simple ID selectors like "#todo-1", "#counter-value", "#todo-list"
+4. NEVER use complex attribute selectors like [data-action-data='{"id":"1"}'] - they will FAIL
+5. If an element lacks an ID, use the closest parent with an ID + child selector (e.g., "#todo-list ul")
+6. Keep patches minimal - only change what's needed
+7. For counters/numbers: just update the text content
+8. For lists: use append/prepend to add items, remove to delete
+9. For checkboxes: use "#todo-1-checkbox" not input[data-action="toggle"]
+10. For boolean attributes (checked, disabled): use "checked" to set, null to remove
 
 Example for checking a checkbox:
 [{"selector": "#todo-1-checkbox", "attr": {"checked": "checked"}}]
