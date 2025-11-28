@@ -1,0 +1,134 @@
+# Generative UI: Development Approach
+
+A chronological journey building an AI-powered generative UI system.
+
+---
+
+## Step 1: Choosing the Stack
+
+**Goal:** Find a frontend framework that AI can control by generating HTML.
+
+**Why Alpine.js over React?**
+- React requires generating JavaScript/JSX, component trees, state management
+- Alpine.js works with plain HTML + declarative attributes
+- AI can generate a complete interactive page as a single HTML string
+- No build step needed for generated content - just render and it works
+
+**Backend:** Effect-TS for type-safe services and dependency injection.
+
+---
+
+## Step 2: First AI-Generated Pages
+
+**Goal:** AI generates complete HTML pages from natural language.
+
+- User types "create a login form"
+- AI returns raw HTML with Tailwind classes
+- Frontend renders it via Alpine's `x-html`
+
+**Problem:** AI sometimes wrapped output in markdown code blocks.
+**Solution:** Stronger system prompt - "raw HTML only, never use code fences."
+
+---
+
+## Step 3: Generated UI Isn't Interactive
+
+**Problem:** Buttons don't click. Forms don't submit. Nothing works.
+
+**Root Cause:** Alpine.js doesn't process directives (`@click`, `x-model`) inside `x-html` for security reasons - this prevents XSS attacks.
+
+**Implication:** Our core assumption was broken. We can generate HTML, but it can't have any Alpine interactivity.
+
+---
+
+## Step 4: Adding Conversation Memory
+
+**Goal:** AI should remember what it built so users can iterate.
+
+- Store conversation history per session
+- "Make the button red" works because AI sees previous HTML
+- Enables back-and-forth design refinement
+
+---
+
+## Step 5: Solving Interactivity
+
+**Problem:** How do we make generated UIs interactive without client-side JavaScript?
+
+**Key Insight:** Move ALL interaction handling to the server. This is the LiveView/HTMX pattern.
+
+**Why this approach?**
+- No client-side code in generated HTML = no security concerns
+- AI only needs to generate declarative markup
+- Server has full context (session, state, history)
+- Single mental model: every interaction regenerates the page
+
+---
+
+## Step 6: The Action System
+
+**How it works:**
+1. AI generates buttons with `data-action="increment"` instead of `@click`
+2. User clicks button
+3. Frontend intercepts click, collects all form values, sends to server
+4. Server tells AI: "user clicked increment, here's the current HTML"
+5. AI regenerates complete page with updated state
+6. Frontend replaces content
+
+**Result:** Fully interactive UIs with zero client-side logic in generated code.
+
+---
+
+## Step 7: Quality of Life - Enter Key
+
+**Problem:** Users expect Enter to submit, but it doesn't work.
+
+**Solution:** Frontend automatically finds the nearest action button when Enter is pressed in an input field.
+
+---
+
+## Step 8: State Persistence Bug
+
+**Problem:** Building a counter works, but clicking +1 resets everything to the welcome screen.
+
+**Root Cause:** When there's an action but no text prompt, the system prompt fell through to "generate initial welcome page."
+
+**Fix:** Explicit instruction to AI: "When handling an action, look at your previous HTML and update it. Never revert to the welcome page."
+
+---
+
+## Step 9: Token Usage Grows Fast
+
+**Problem:** Every request sends full conversation history including complete HTML pages. Gets expensive quickly.
+
+**Explored options:**
+1. **Extract state to JSON** - AI embeds `<!-- STATE: {...} -->`, backend parses it. Concern: brittle, regex parsing, AI might forget format.
+2. **Prompt caching** - Groq caches repeated prefixes at 50% discount. Simpler, no code changes, but still sends full content.
+
+**Status:** Open decision point.
+
+---
+
+## Step 10: VDOM for Efficient Updates
+
+**Problem:** Full page replacement on every action feels heavy. Could we send just the changes?
+
+**Exploration:** Built a proof-of-concept showing:
+- Represent UI as serializable virtual DOM
+- Diff old vs new, generate patches
+- Send patches over the wire instead of full HTML
+- Client applies minimal DOM updates
+
+**Potential:** Smaller payloads, smoother updates, better perceived performance.
+
+**Status:** Proof of concept only, not integrated.
+
+---
+
+## Key Takeaways
+
+1. **Alpine over React** - AI can steer a responsive frontend by generating plain HTML
+2. **Server-side actions** - Solved the x-html security limitation elegantly
+3. **Single endpoint** - One `/generate` route handles both prompts and actions
+4. **State lives in conversation** - AI parses its own previous output to understand current state
+5. **Trade-offs remain** - Token usage and update efficiency are unsolved at scale
