@@ -1,75 +1,26 @@
-import { Effect } from "effect"
-import { generateText } from "ai"
-import { LlmService } from "./llm.js"
-import type { ConversationMessage } from "./session.js"
-import type { Patch } from "./vdom.js"
+import { Effect } from "effect";
+import { generateText } from "ai";
+import { LlmService } from "./llm.js";
+import type { ConversationMessage } from "./session.js";
+import type { Patch } from "./vdom.js";
 
 export type GenerateOptions = {
-  prompt?: string
-  history?: ConversationMessage[]
-  action?: string
-  actionData?: Record<string, unknown>
-  currentHtml?: string
-}
+  prompt?: string;
+  history?: ConversationMessage[];
+  action?: string;
+  actionData?: Record<string, unknown>;
+  currentHtml?: string;
+};
 
 export type GeneratePatchesOptions = {
-  currentHtml: string
-  action: string
-  actionData?: Record<string, unknown>
-  previousErrors?: string[]
-}
+  currentHtml: string;
+  action: string;
+  actionData?: Record<string, unknown>;
+  previousErrors?: string[];
+};
 
-export class GenerateService extends Effect.Service<GenerateService>()("GenerateService", {
-  accessors: true,
-  effect: Effect.gen(function* () {
-    const llm = yield* LlmService
-
-    const generateFullHtml = (options: GenerateOptions) =>
-      Effect.gen(function* () {
-        yield* Effect.log("Generating full HTML", options)
-
-        const { prompt, history = [], action, actionData, currentHtml } = options
-
-        const historyContext =
-          history.length > 0
-            ? `\n\nCONVERSATION HISTORY:\n${history
-                .map((msg) => `${msg.role.toUpperCase()}: ${msg.content}`)
-                .join("\n")}`
-            : ""
-
-        const actionContext = action
-          ? `\n\nACTION TRIGGERED:
-Action: ${action}
-Action Data: ${JSON.stringify(actionData, null, 2)}
-
-The user triggered an action. Generate the appropriate UI.`
-          : ""
-
-        const currentHtmlContext = currentHtml
-          ? `\n\nCURRENT UI STATE:
-${currentHtml}
-
-IMPORTANT: The user wants to MODIFY the existing UI above. Preserve the existing design, layout, colors, and style. Only make changes that are explicitly requested.`
-          : ""
-
-        const systemPrompt = `You are a Generative UI Engine that creates interactive web interfaces.
-${historyContext}${actionContext}${currentHtmlContext}
-
-${
-  action
-    ? `ACTION REQUEST:
-The user clicked a button with data-action="${action}".
-Look at the conversation history to understand current state.
-Generate the COMPLETE page with the updated state.`
-    : prompt
-    ? `USER REQUEST: ${prompt}
-Generate an interface based on this request.`
-    : `Generate an initial welcome page for this generative UI system with:
-1. Welcome message explaining this is a generative UI system
-2. Input field for describing changes
-3. "Generate" button with data-action="generate"
-4. Cyber-minimalist design (monochromatic, clean lines, lots of whitespace)`
-}
+// Static system prompt for full HTML generation - cacheable prefix
+const FULL_HTML_SYSTEM_PROMPT = `You are a Generative UI Engine that creates interactive web interfaces.
 
 TECHNICAL REQUIREMENTS:
 - Return ONLY raw HTML - no markdown, no code blocks
@@ -105,49 +56,10 @@ This ensures the user can always escape from any UI state. Place it unobtrusivel
 
 Design: Light mode, high-contrast monochromatic, clean geometric shapes, generous whitespace.
 
-Output only HTML, nothing else.`
+Output only HTML, nothing else.`;
 
-        const result = yield* Effect.tryPromise({
-          try: () =>
-            generateText({
-              model: llm.model,
-              prompt: systemPrompt,
-            }),
-          catch: (error) => {
-            const errorMessage = error instanceof Error ? error.message : String(error)
-            console.error("Generation error:", error)
-            return new Error(`Failed to generate text: ${errorMessage}`)
-          },
-        })
-
-        yield* Effect.log("Full HTML generation completed")
-        return result.text
-      })
-
-    const generatePatches = (options: GeneratePatchesOptions) =>
-      Effect.gen(function* () {
-        yield* Effect.log("Generating patches", { action: options.action, hasErrors: options.previousErrors?.length ?? 0 })
-
-        const { currentHtml, action, actionData, previousErrors = [] } = options
-
-        const errorContext =
-          previousErrors.length > 0
-            ? `\n\nYOUR PREVIOUS PATCHES FAILED:
-${previousErrors.join("\n")}
-
-Please generate corrected patches. Make sure selectors match existing elements.`
-            : ""
-
-        const systemPrompt = `You are a UI Patch Engine. Generate minimal patches to update the UI.
-
-CURRENT HTML:
-${currentHtml}
-
-ACTION TRIGGERED: ${action}
-ACTION DATA: ${JSON.stringify(actionData, null, 2)}
-${errorContext}
-
-Generate a JSON array of patches to update the UI. Each patch targets an element by CSS selector.
+// Static system prompt for patch generation - cacheable prefix
+const PATCH_SYSTEM_PROMPT = `You are a UI Patch Engine. Generate minimal patches to update the UI.
 
 PATCH TYPES:
 - { "selector": "#id", "text": "new text" } - Set text content
@@ -183,36 +95,145 @@ Example for adding a todo (note: use &quot; for JSON in attributes):
 Example for deleting a todo:
 [{"selector": "#todo-1", "remove": true}]
 
-Output ONLY the JSON array, no explanation, no markdown.`
+Output ONLY the JSON array, no explanation, no markdown.`;
 
-        const result = yield* Effect.tryPromise({
-          try: () =>
-            generateText({
-              model: llm.model,
-              prompt: systemPrompt,
-            }),
-          catch: (error) => {
-            const errorMessage = error instanceof Error ? error.message : String(error)
-            console.error("Patch generation error:", error)
-            return new Error(`Failed to generate patches: ${errorMessage}`)
-          },
-        })
+export class GenerateService extends Effect.Service<GenerateService>()(
+  "GenerateService",
+  {
+    accessors: true,
+    effect: Effect.gen(function* () {
+      const llm = yield* LlmService;
 
-        // Parse the JSON response
-        const text = result.text.trim()
-        const jsonText = text.startsWith("```")
-          ? text.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "")
-          : text
+      const generateFullHtml = (options: GenerateOptions) =>
+        Effect.gen(function* () {
+          yield* Effect.log("Generating full HTML", options);
 
-        const patches = yield* Effect.try({
-          try: () => JSON.parse(jsonText) as Patch[],
-          catch: (e) => new Error(`Failed to parse patches JSON: ${e}\nResponse was: ${text}`),
-        })
+          const { prompt, action, actionData, currentHtml } = options;
 
-        yield* Effect.log("Patch generation completed", { patchCount: patches.length })
-        return patches
-      })
+          // Build user message with dynamic content
+          const userMessageParts: string[] = [];
 
-    return { generateFullHtml, generatePatches }
-  }),
-}) {}
+          if (currentHtml) {
+            userMessageParts.push(
+              `CURRENT UI STATE:\n${currentHtml}\n\nIMPORTANT: Preserve the existing design, layout, colors, and style. Only make changes that are explicitly requested.`
+            );
+          }
+
+          if (action) {
+            userMessageParts.push(
+              `ACTION TRIGGERED: ${action}\nAction Data: ${JSON.stringify(
+                actionData,
+                null,
+                0
+              )}\n\nThe user clicked a button with data-action="${action}". Generate the COMPLETE page with the updated state.`
+            );
+          } else if (prompt) {
+            userMessageParts.push(
+              `USER REQUEST: ${prompt}\n\nGenerate an interface based on this request.`
+            );
+          } else {
+            userMessageParts.push(`Generate an initial welcome page for this generative UI system with:
+1. Welcome message explaining this is a generative UI system
+2. Input field for describing changes
+3. "Generate" button with data-action="generate"
+4. Cyber-minimalist design (monochromatic, clean lines, lots of whitespace)`);
+          }
+
+          const messages = [
+            { role: "system" as const, content: FULL_HTML_SYSTEM_PROMPT },
+            { role: "user" as const, content: userMessageParts.join("\n\n") },
+          ];
+
+          const result = yield* Effect.tryPromise({
+            try: () =>
+              generateText({
+                model: llm.model,
+                messages,
+              }),
+            catch: (error) => {
+              const errorMessage =
+                error instanceof Error ? error.message : String(error);
+              console.error("Generation error:", error);
+              return new Error(`Failed to generate text: ${errorMessage}`);
+            },
+          });
+
+          yield* Effect.log("Full HTML generation completed");
+          return result.text;
+        });
+
+      const generatePatches = (options: GeneratePatchesOptions) =>
+        Effect.gen(function* () {
+          yield* Effect.log("Generating patches", {
+            action: options.action,
+            hasErrors: options.previousErrors?.length ?? 0,
+          });
+
+          const {
+            currentHtml,
+            action,
+            actionData,
+            previousErrors = [],
+          } = options;
+
+          // Build user message with dynamic content
+          const userMessageParts = [
+            `CURRENT HTML:\n${currentHtml}`,
+            `ACTION TRIGGERED: ${action}\nACTION DATA: ${JSON.stringify(
+              actionData,
+              null,
+              0
+            )}`,
+          ];
+
+          if (previousErrors.length > 0) {
+            userMessageParts.push(
+              `YOUR PREVIOUS PATCHES FAILED:\n${previousErrors.join(
+                "\n"
+              )}\n\nPlease generate corrected patches. Make sure selectors match existing elements.`
+            );
+          }
+
+          const messages = [
+            { role: "system" as const, content: PATCH_SYSTEM_PROMPT },
+            { role: "user" as const, content: userMessageParts.join("\n\n") },
+          ];
+
+          const result = yield* Effect.tryPromise({
+            try: () =>
+              generateText({
+                model: llm.model,
+                messages,
+              }),
+            catch: (error) => {
+              const errorMessage =
+                error instanceof Error ? error.message : String(error);
+              console.error("Patch generation error:", error);
+              return new Error(`Failed to generate patches: ${errorMessage}`);
+            },
+          });
+
+          // Parse the JSON response
+          const text = result.text.trim();
+          const jsonText = text.startsWith("```")
+            ? text.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "")
+            : text;
+
+          const patches = yield* Effect.try({
+            try: () => JSON.parse(jsonText) as Patch[],
+            catch: (e) =>
+              new Error(
+                `Failed to parse patches JSON: ${e}\nResponse was: ${text}`
+              ),
+          });
+
+          yield* Effect.log("Patch generation completed", {
+            patchCount: patches.length,
+          });
+          return patches;
+        });
+
+      return { generateFullHtml, generatePatches };
+    }),
+  }
+) {}

@@ -166,6 +166,24 @@ A chronological journey building an AI-powered generative UI system.
 
 ---
 
+## Step 13: Prompt Caching Optimization
+
+**Problem:** System prompts were rebuilt dynamically on every request, mixing static instructions with dynamic content. This breaks Groq's automatic prompt caching (which requires exact prefix matching).
+
+**Solution:** Separate static and dynamic content into system vs user messages:
+- Static system prompt: All instructions, rules, examples (cacheable)
+- Dynamic user message: Current HTML, action, actionData (varies per request)
+
+**Structure:**
+```
+[SYSTEM] Static instructions, rules, examples  ← cached after first request
+[USER]   Current HTML + action context         ← dynamic per request
+```
+
+**Result:** Noticeably faster responses. Groq caches the system prompt prefix and only processes the dynamic user content on subsequent requests.
+
+---
+
 ## Key Takeaways
 
 1. **Plain HTML over JSX** - AI can steer a responsive frontend by generating plain HTML
