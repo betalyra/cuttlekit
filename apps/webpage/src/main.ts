@@ -1,5 +1,6 @@
 import "./style.css"
 import { loadFontsFromHTML } from "./fonts"
+import { loadIconsFromHTML } from "./icons"
 
 type GenerateRequest = {
   type: "generate"
@@ -91,10 +92,11 @@ const app = {
       return
     }
 
-    // Load fonts from patch content
+    // Load fonts and icons from patch content
     const content = this.extractPatchContent(patch)
     if (content) {
       loadFontsFromHTML(content)
+      loadIconsFromHTML(content)
     }
 
     if ("text" in patch) {
@@ -129,10 +131,12 @@ const app = {
       case "html":
         this.getElements().contentEl.innerHTML = event.html
         loadFontsFromHTML(event.html)
+        loadIconsFromHTML(event.html)
         break
       case "done":
         // Final state - stream complete
         loadFontsFromHTML(event.html)
+        loadIconsFromHTML(event.html)
         break
     }
   },
@@ -242,6 +246,7 @@ const app = {
       if (data.type === "full-page" && data.html) {
         this.getElements().contentEl.innerHTML = data.html
         loadFontsFromHTML(data.html)
+        loadIconsFromHTML(data.html)
       }
     } catch (err) {
       this.setError(err instanceof Error ? err.message : String(err))
