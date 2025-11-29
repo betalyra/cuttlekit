@@ -4,6 +4,26 @@ import { z } from "zod";
 import { LlmProvider } from "./llm.js";
 import type { Patch } from "./vdom.js";
 
+// Wrap async iterable to handle AI SDK cleanup errors gracefully
+async function* safeAsyncIterable<T>(
+  iterable: AsyncIterable<T>
+): AsyncGenerator<T> {
+  const iterator = iterable[Symbol.asyncIterator]();
+  try {
+    while (true) {
+      const { done, value } = await iterator.next();
+      if (done) return;
+      yield value;
+    }
+  } finally {
+    try {
+      await iterator.return?.();
+    } catch {
+      // Ignore - AI SDK throws when reader is detached during cleanup
+    }
+  }
+}
+
 // Zod schema for patches - matches the Patch type
 const PatchSchema = z.union([
   z.object({ selector: z.string(), text: z.string() }),
@@ -433,7 +453,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
 
           // Convert partial object stream to stream of individual patches
           const effectStream = Stream.fromAsyncIterable(
-            result.partialObjectStream,
+            safeAsyncIterable(result.partialObjectStream),
             (error) =>
               error instanceof Error
                 ? error
@@ -562,7 +582,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
           let emittedFull = false;
 
           const effectStream = Stream.fromAsyncIterable(
-            result.partialObjectStream,
+            safeAsyncIterable(result.partialObjectStream),
             (error) =>
               error instanceof Error
                 ? error
@@ -605,6 +625,23 @@ export class GenerateService extends Effect.Service<GenerateService>()(
                 }
 
                 return [];
+              })
+            ),
+            Stream.ensuring(
+              Effect.gen(function* () {
+                const usage = yield* Effect.promise(() => result.usage);
+
+                const inputTokens = usage.inputTokens ?? 0;
+                const cachedTokens = usage.cachedInputTokens ?? 0;
+                const cacheHitRate = inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0;
+
+                yield* Effect.log("Stream completed - Token usage", {
+                  inputTokens,
+                  outputTokens: usage.outputTokens ?? 0,
+                  totalTokens: usage.totalTokens ?? 0,
+                  cachedTokens,
+                  cacheHitRate: `${cacheHitRate.toFixed(1)}%`,
+                });
               })
             )
           );
