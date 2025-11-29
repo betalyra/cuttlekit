@@ -7,17 +7,40 @@ import {
   HttpMiddleware,
   HttpServer,
   HttpServerResponse,
+  KeyValueStore,
 } from "@effect/platform";
-import { NodeHttpServer, NodeRuntime } from "@effect/platform-node";
+import { NodeHttpServer, NodeRuntime, NodeFileSystem, NodePath } from "@effect/platform-node";
 import { Config, Effect, Layer, Logger, LogLevel, Schema, Stream } from "effect";
 import { createServer } from "node:http";
 import { GenerateService } from "./services/generate.js";
 import { GoogleService, GroqService } from "./services/llm.js";
 import { SessionService } from "./services/session.js";
+import { StorageService } from "./services/storage.js";
 import { VdomService } from "./services/vdom.js";
 import { UIService } from "./services/ui.js";
 import { RequestHandlerService } from "./services/request-handler.js";
 import { Request, Response } from "./types/messages.js";
+
+// Storage layer based on STORAGE env var (memory | file)
+const StorageLayerLive = Layer.unwrapEffect(
+  Effect.gen(function* () {
+    const storageType = yield* Config.literal(
+      "memory",
+      "file"
+    )("STORAGE").pipe(Config.withDefault("memory"));
+
+    if (storageType === "file") {
+      yield* Effect.logInfo("Using file-based storage at ./.data");
+      return KeyValueStore.layerFileSystem("./.data").pipe(
+        Layer.provide(NodeFileSystem.layer),
+        Layer.provide(NodePath.layer)
+      );
+    } else {
+      yield* Effect.logInfo("Using in-memory storage");
+      return KeyValueStore.layerMemory;
+    }
+  })
+);
 
 const api = HttpApi.make("api")
   .add(
@@ -58,6 +81,8 @@ const healthGroupLive = HttpApiBuilder.group(api, "health", (handlers) =>
 const ServicesLive = RequestHandlerService.Default.pipe(
   Layer.provideMerge(UIService.Default),
   Layer.provideMerge(SessionService.Default),
+  Layer.provideMerge(StorageService.Default),
+  Layer.provideMerge(StorageLayerLive),
   Layer.provideMerge(VdomService.Default),
   Layer.provideMerge(GenerateService.Default),
   Layer.provideMerge(

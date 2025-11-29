@@ -1,46 +1,20 @@
-import { Effect, Ref } from "effect";
-import { GoogleService } from "./llm";
-
-export type ConversationMessage = {
-  role: "user" | "assistant";
-  content: string;
-  timestamp: number;
-};
+import { DateTime, Effect, Random } from "effect";
 
 export class SessionService extends Effect.Service<SessionService>()(
   "SessionService",
   {
     accessors: true,
     effect: Effect.gen(function* () {
-      // Store conversation history per session
-      const sessionsRef = yield* Ref.make(
-        new Map<string, ConversationMessage[]>()
-      );
-
-      const getHistory = (sessionId: string) =>
-        Effect.gen(function* () {
-          const sessions = yield* Ref.get(sessionsRef);
-          return sessions.get(sessionId) || [];
-        });
-
-      const addMessage = (sessionId: string, message: ConversationMessage) =>
-        Ref.update(sessionsRef, (sessions) => {
-          const history = sessions.get(sessionId) || [];
-          const updatedHistory = [...history, message];
-          // Keep only last 10 messages
-          const trimmedHistory = updatedHistory.slice(-10);
-          const newSessions = new Map(sessions);
-          newSessions.set(sessionId, trimmedHistory);
-          return newSessions;
-        });
-
       const generateSessionId = () =>
-        Effect.sync(
-          () =>
-            `session-${Date.now()}-${Math.random().toString(36).substring(7)}`
-        );
+        Effect.gen(function* () {
+          const now = yield* DateTime.now;
+          const timestamp = DateTime.toEpochMillis(now);
+          const random = yield* Random.nextIntBetween(0, 2147483647);
+          const randomStr = random.toString(36).substring(0, 7);
+          return `session-${timestamp}-${randomStr}`;
+        });
 
-      return { getHistory, addMessage, generateSessionId };
+      return { generateSessionId };
     }),
   }
 ) {}

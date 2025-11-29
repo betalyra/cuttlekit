@@ -1,6 +1,7 @@
-import { Effect, Stream } from "effect";
+import { DateTime, Effect, Stream } from "effect";
 import { GenerateService, type UnifiedResponse } from "./generate.js";
 import { SessionService } from "./session.js";
+import { StorageService } from "./storage.js";
 import { VdomService, type Patch } from "./vdom.js";
 
 const MAX_PATCH_RETRIES = 2;
@@ -23,6 +24,7 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
   effect: Effect.gen(function* () {
     const generateService = yield* GenerateService;
     const sessionService = yield* SessionService;
+    const storageService = yield* StorageService;
     const vdomService = yield* VdomService;
 
     const resolveSession = (request: UIRequest) =>
@@ -58,10 +60,11 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
 
         // Add user message to history
         if (prompt) {
-          yield* sessionService.addMessage(sessionId, {
+          const now = yield* DateTime.now;
+          yield* storageService.addMessage(sessionId, {
             role: "user",
             content: prompt,
-            timestamp: Date.now(),
+            timestamp: DateTime.toEpochMillis(now),
           });
         }
 
@@ -77,10 +80,11 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
         yield* vdomService.setHtml(sessionId, html);
 
         // Add to history
-        yield* sessionService.addMessage(sessionId, {
+        const nowAssistant = yield* DateTime.now;
+        yield* storageService.addMessage(sessionId, {
           role: "assistant",
           content: `[Generated UI: ${html.slice(0, 100)}...]`,
-          timestamp: Date.now(),
+          timestamp: DateTime.toEpochMillis(nowAssistant),
         });
 
         return html;
@@ -98,10 +102,11 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
         const { action, actionData, currentHtml } = options;
 
         // Add action to history
-        yield* sessionService.addMessage(sessionId, {
+        const now = yield* DateTime.now;
+        yield* storageService.addMessage(sessionId, {
           role: "user",
           content: `[Action: ${action}] ${JSON.stringify(actionData || {})}`,
-          timestamp: Date.now(),
+          timestamp: DateTime.toEpochMillis(now),
         });
 
         // Try patch generation with retries
@@ -124,10 +129,11 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
           if (result.errors.length === 0) {
             yield* Effect.log("Patches applied successfully");
 
-            yield* sessionService.addMessage(sessionId, {
+            const nowPatches = yield* DateTime.now;
+            yield* storageService.addMessage(sessionId, {
               role: "assistant",
               content: `[Applied ${result.applied} patches]`,
-              timestamp: Date.now(),
+              timestamp: DateTime.toEpochMillis(nowPatches),
             });
 
             return { success: true as const, html: result.html };
@@ -212,10 +218,11 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
             currentHtml,
           });
 
-          yield* sessionService.addMessage(sessionId, {
+          const nowFallback = yield* DateTime.now;
+          yield* storageService.addMessage(sessionId, {
             role: "assistant",
             content: `[Fallback: regenerated full UI]`,
-            timestamp: Date.now(),
+            timestamp: DateTime.toEpochMillis(nowFallback),
           });
 
           return { html, sessionId };
@@ -232,9 +239,7 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
       | { type: "html"; html: string }
       | { type: "done"; html: string };
 
-    const generateStream = (
-      request: UIRequest
-    ): Effect.Effect<Stream.Stream<StreamEvent, Error>, Error> =>
+    const generateStream = (request: UIRequest) =>
       Effect.gen(function* () {
         const { sessionId, currentHtml } = yield* resolveSession(request);
         const prompt =
@@ -255,16 +260,18 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
 
         // Add user message to history
         if (prompt) {
-          yield* sessionService.addMessage(sessionId, {
+          const nowPrompt = yield* DateTime.now;
+          yield* storageService.addMessage(sessionId, {
             role: "user",
             content: prompt,
-            timestamp: Date.now(),
+            timestamp: DateTime.toEpochMillis(nowPrompt),
           });
         } else if (request.action) {
-          yield* sessionService.addMessage(sessionId, {
+          const nowAction = yield* DateTime.now;
+          yield* storageService.addMessage(sessionId, {
             role: "user",
             content: `[Action: ${request.action}] ${JSON.stringify(request.actionData || {})}`,
-            timestamp: Date.now(),
+            timestamp: DateTime.toEpochMillis(nowAction),
           });
         }
 
@@ -277,7 +284,7 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
         });
 
         // Start with session event
-        const sessionEvent = Stream.make({ type: "session" as const, sessionId });
+        const sessionEvent = Stream.make({ type: "session" as const, sessionId } as StreamEvent);
 
         // Transform unified responses to stream events, applying to VDOM
         let lastHtml = currentHtml || "";
@@ -316,13 +323,14 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
             const finalHtml = yield* vdomService.getHtml(sessionId);
             lastHtml = finalHtml || lastHtml;
 
-            yield* sessionService.addMessage(sessionId, {
+            const nowDone = yield* DateTime.now;
+            yield* storageService.addMessage(sessionId, {
               role: "assistant",
               content: `[Generated UI: ${lastHtml.slice(0, 100)}...]`,
-              timestamp: Date.now(),
+              timestamp: DateTime.toEpochMillis(nowDone),
             });
 
-            return { type: "done" as const, html: lastHtml };
+            return { type: "done" as const, html: lastHtml } as StreamEvent;
           })
         );
 

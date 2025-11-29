@@ -323,6 +323,22 @@ const UnifiedResponseSchema = z.union([
 
 ---
 
+## Step 18: Persistent Storage with Effect KeyValueStore
+
+**Problem:** Session data was ephemeral. Server restart loses all state.
+
+**Solution:** New `StorageService` using Effect's `KeyValueStore` abstraction.
+
+**Key changes:**
+- `STORAGE=memory` (default) or `STORAGE=file` (persists to `.data/`)
+- Effect Schema validates stored data with proper `StorageParseError`
+- `SessionService` only generates IDs; `StorageService` handles all persistence
+- Schema includes `embedding`, `summary`, `facts` fields for future compaction and RAG
+
+**Result:** Clean separation of concerns. Ready for conversation summarization and semantic search.
+
+---
+
 ## Key Takeaways
 
 1. **Plain HTML over JSX** - AI can steer a responsive frontend by generating plain HTML

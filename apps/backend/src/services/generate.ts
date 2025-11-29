@@ -2,7 +2,6 @@ import { Effect, Stream, pipe } from "effect";
 import { generateText, streamObject, ModelMessage, TextPart } from "ai";
 import { z } from "zod";
 import { LlmProvider } from "./llm.js";
-import type { ConversationMessage } from "./session.js";
 import type { Patch } from "./vdom.js";
 
 // Zod schema for patches - matches the Patch type
@@ -36,7 +35,6 @@ export type UnifiedResponse = z.infer<typeof UnifiedResponseSchema>;
 
 export type GenerateOptions = {
   prompt?: string;
-  history?: ConversationMessage[];
   action?: string;
   actionData?: Record<string, unknown>;
   currentHtml?: string;
@@ -467,10 +465,13 @@ export class GenerateService extends Effect.Service<GenerateService>()(
                     Effect.gen(function* () {
                       const result = PatchSchema.safeParse(p);
                       if (!result.success) {
-                        yield* Effect.logDebug("[streamPatches] Invalid patch", {
-                          patch: p,
-                          error: result.error.message,
-                        });
+                        yield* Effect.logDebug(
+                          "[streamPatches] Invalid patch",
+                          {
+                            patch: p,
+                            error: result.error.message,
+                          }
+                        );
                         return null;
                       }
                       return result.data as Patch;
@@ -512,7 +513,11 @@ export class GenerateService extends Effect.Service<GenerateService>()(
             : "NO CURRENT HTML - this is an initial page generation. You MUST use full mode.";
 
           const actionPart = action
-            ? `ACTION TRIGGERED: ${action}\nACTION DATA: ${JSON.stringify(actionData, null, 0)}`
+            ? `ACTION TRIGGERED: ${action}\nACTION DATA: ${JSON.stringify(
+                actionData,
+                null,
+                0
+              )}`
             : null;
 
           const promptPart = prompt ? `USER REQUEST: ${prompt}` : null;
@@ -568,7 +573,8 @@ export class GenerateService extends Effect.Service<GenerateService>()(
                 // Try parsing as patches mode
                 const patchesResult = PartialPatchesSchema.safeParse(partial);
                 if (patchesResult.success) {
-                  const newPatches = patchesResult.data.patches.slice(emittedPatchCount);
+                  const newPatches =
+                    patchesResult.data.patches.slice(emittedPatchCount);
                   const validatedPatches = yield* pipe(
                     newPatches,
                     Effect.forEach((p) =>
@@ -606,7 +612,12 @@ export class GenerateService extends Effect.Service<GenerateService>()(
           return effectStream;
         });
 
-      return { generateFullHtml, generatePatches, streamPatches, streamUnified };
+      return {
+        generateFullHtml,
+        generatePatches,
+        streamPatches,
+        streamUnified,
+      };
     }),
   }
 ) {}

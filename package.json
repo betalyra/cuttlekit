@@ -4,6 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "dev": "pnpm dev:webpage & pnpm dev:backend",
+    "build": "pnpm build:webpage & pnpm build:backend",
+    "preview": "pnpm preview:webpage & pnpm preview:backend",
     "dev:webpage": "pnpm --filter @betalyra/generative-ui-webpage dev",
     "build:webpage": "pnpm --filter @betalyra/generative-ui-webpage build",
     "preview:webpage": "pnpm --filter @betalyra/generative-ui-webpage preview",
