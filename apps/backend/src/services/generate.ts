@@ -1,7 +1,16 @@
 import { Effect, Stream, pipe } from "effect";
-import { generateText, streamObject, ModelMessage, TextPart } from "ai";
+import {
+  generateText,
+  streamText,
+  Output,
+  ModelMessage,
+  TextPart,
+  stepCountIs,
+  ToolSet,
+} from "ai";
 import { z } from "zod";
 import { LlmProvider } from "./llm.js";
+import { LinearMcpService } from "./linear-mcp.js";
 import type { Patch } from "./vdom.js";
 
 // Wrap async iterable to handle AI SDK cleanup errors gracefully
@@ -133,6 +142,9 @@ Stick to Inter unless a specific aesthetic is requested.
 
 Design: Light mode (#fafafa background, #0a0a0a text), minimal brutalist UI, generous whitespace, no decorative elements.
 
+EXTERNAL DATA:
+You have access to MCP tools that connect to external services. When the user requests information from external sources, ALWAYS call the appropriate tool to fetch real data first. Never generate placeholder or mock data when tools are available to get actual data.
+
 Output only HTML, nothing else.`;
 
 // Static system prompt for patch generation - cacheable prefix
@@ -240,6 +252,9 @@ Stick to Inter unless a specific aesthetic is requested.
 
 Design: Light mode (#fafafa background, #0a0a0a text), minimal brutalist UI, generous whitespace.
 
+EXTERNAL DATA:
+You have access to MCP tools that connect to external services. When the user requests information from external sources, ALWAYS call the appropriate tool to fetch real data first. Never generate placeholder or mock data when tools are available to get actual data.
+
 Output ONLY the JSON object, nothing else.`;
 
 export type UnifiedGenerateOptions = {
@@ -255,6 +270,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
     accessors: true,
     effect: Effect.gen(function* () {
       const llm = yield* LlmProvider;
+      const linearMcp = yield* LinearMcpService;
 
       const generateFullHtml = (options: GenerateOptions) =>
         Effect.gen(function* () {
@@ -305,6 +321,9 @@ Cyber-minimalist design (monochromatic, clean lines, lots of whitespace).`,
               generateText({
                 model: llm.provider.languageModel("openai/gpt-oss-20b"),
                 messages,
+                tools: linearMcp.tools as ToolSet,
+                toolChoice: "auto",
+                stopWhen: stepCountIs(5),
               }),
             catch: (error) => {
               const errorMessage =
@@ -314,11 +333,22 @@ Cyber-minimalist design (monochromatic, clean lines, lots of whitespace).`,
             },
           });
 
+          // Log tool calls if any
+          if (result.steps && result.steps.length > 1) {
+            yield* Effect.log("Tool calls made", {
+              stepCount: result.steps.length,
+              toolCalls: result.steps.flatMap(
+                (s) => s.toolCalls?.map((tc) => tc.toolName) ?? []
+              ),
+            });
+          }
+
           // Log token usage with cache stats
           const usage = result.usage;
           const inputTokens = usage.inputTokens ?? 0;
           const cachedTokens = usage.cachedInputTokens ?? 0;
-          const cacheHitRate = inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0;
+          const cacheHitRate =
+            inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0;
 
           yield* Effect.log("Full HTML generation completed - Token usage", {
             inputTokens,
@@ -386,7 +416,8 @@ Cyber-minimalist design (monochromatic, clean lines, lots of whitespace).`,
           const usage = result.usage;
           const inputTokens = usage.inputTokens ?? 0;
           const cachedTokens = usage.cachedInputTokens ?? 0;
-          const cacheHitRate = inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0;
+          const cacheHitRate =
+            inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0;
 
           yield* Effect.log("Patch generation - Token usage", {
             inputTokens,
@@ -459,89 +490,93 @@ Cyber-minimalist design (monochromatic, clean lines, lots of whitespace).`
             { role: "user" as const, content: userMessage },
           ];
 
-          const result = streamObject({
+          // Use streamText with tools - no JSON mode (incompatible with tools)
+          const result = streamText({
             model: llm.provider.languageModel("openai/gpt-oss-20b"),
             messages,
-            schema: UnifiedResponseSchema,
-            mode: "json",
+            tools: linearMcp.tools as ToolSet,
+            toolChoice: "auto",
+            stopWhen: stepCountIs(5),
           });
 
-          // Partial schemas for streaming validation
-          const PartialPatchesSchema = z.object({
-            mode: z.literal("patches"),
-            patches: z.array(z.unknown()),
-          });
-
-          const FullHtmlSchema = z.object({
-            mode: z.literal("full"),
-            html: z.string(),
-          });
-
-          let emittedPatchCount = 0;
-          let emittedFull = false;
+          // Accumulate text chunks and emit final parsed response
+          let accumulatedText = "";
 
           const effectStream = Stream.fromAsyncIterable(
-            safeAsyncIterable(result.partialObjectStream),
+            safeAsyncIterable(result.textStream),
             (error) =>
               error instanceof Error
                 ? error
                 : new Error(`Stream error: ${String(error)}`)
           ).pipe(
-            Stream.mapConcatEffect((partial) =>
-              Effect.gen(function* () {
-                // Try parsing as patches mode
-                const patchesResult = PartialPatchesSchema.safeParse(partial);
-                if (patchesResult.success) {
-                  const newPatches =
-                    patchesResult.data.patches.slice(emittedPatchCount);
-                  const validatedPatches = yield* pipe(
-                    newPatches,
-                    Effect.forEach((p) =>
-                      Effect.sync(() => PatchSchema.safeParse(p))
-                    ),
-                    Effect.map((results) =>
-                      results
-                        .filter((r) => r.success)
-                        .map((r) => r.data as Patch)
-                    )
-                  );
+            // Accumulate all text chunks
+            Stream.map((chunk) => {
+              accumulatedText += chunk;
+              return null; // Don't emit anything yet
+            }),
+            Stream.filter((x): x is never => x !== null),
+            // After stream ends, parse and emit the result
+            Stream.concat(
+              Stream.fromEffect(
+                Effect.gen(function* () {
+                  // Wait for the stream to complete and get final text
+                  const finalText = yield* Effect.promise(() => result.text);
 
-                  emittedPatchCount += validatedPatches.length;
+                  // Log tool calls if any
+                  const steps = yield* Effect.promise(() => result.steps);
+                  if (steps.length > 1) {
+                    yield* Effect.log("Tool calls made", {
+                      stepCount: steps.length,
+                      toolCalls: steps.flatMap(
+                        (s) => s.toolCalls?.map((tc) => tc.toolName) ?? []
+                      ),
+                    });
+                  }
 
-                  return validatedPatches.map(
-                    (patch): UnifiedResponse => ({
-                      mode: "patches",
-                      patches: [patch],
-                    })
-                  );
-                }
+                  // Log token usage
+                  const usage = yield* Effect.promise(() => result.usage);
+                  const inputTokens = usage.inputTokens ?? 0;
+                  const cachedTokens = usage.cachedInputTokens ?? 0;
+                  const cacheHitRate =
+                    inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0;
 
-                // Try parsing as full HTML mode
-                const fullResult = FullHtmlSchema.safeParse(partial);
-                if (fullResult.success && !emittedFull) {
-                  emittedFull = true;
-                  return [fullResult.data];
-                }
+                  yield* Effect.log("Stream completed - Token usage", {
+                    inputTokens,
+                    outputTokens: usage.outputTokens ?? 0,
+                    totalTokens: usage.totalTokens ?? 0,
+                    cachedTokens,
+                    cacheHitRate: `${cacheHitRate.toFixed(1)}%`,
+                  });
 
-                return [];
-              })
-            ),
-            Stream.ensuring(
-              Effect.gen(function* () {
-                const usage = yield* Effect.promise(() => result.usage);
+                  // Parse the final text as JSON
+                  const text = finalText.trim();
+                  const jsonText = text.startsWith("```")
+                    ? text
+                        .replace(/^```(?:json)?\n?/, "")
+                        .replace(/\n?```$/, "")
+                    : text;
 
-                const inputTokens = usage.inputTokens ?? 0;
-                const cachedTokens = usage.cachedInputTokens ?? 0;
-                const cacheHitRate = inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0;
+                  const parsed = yield* Effect.try({
+                    try: () => JSON.parse(jsonText),
+                    catch: (e) =>
+                      new Error(
+                        `Failed to parse response JSON: ${e}\nResponse was: ${text}`
+                      ),
+                  });
 
-                yield* Effect.log("Stream completed - Token usage", {
-                  inputTokens,
-                  outputTokens: usage.outputTokens ?? 0,
-                  totalTokens: usage.totalTokens ?? 0,
-                  cachedTokens,
-                  cacheHitRate: `${cacheHitRate.toFixed(1)}%`,
-                });
-              })
+                  // Validate against schema
+                  const validated = UnifiedResponseSchema.safeParse(parsed);
+                  if (!validated.success) {
+                    yield* Effect.fail(
+                      new Error(
+                        `Invalid response format: ${validated.error.message}\nResponse was: ${text}`
+                      )
+                    );
+                  }
+
+                  return validated.data as UnifiedResponse;
+                })
+              )
             )
           );
 

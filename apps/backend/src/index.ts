@@ -10,6 +10,7 @@ import { createServer } from "node:http";
 
 import { api, healthGroupLive, makeGenerateGroupLive } from "./api.js";
 import { GenerateService } from "./services/generate.js";
+import { LinearMcpServiceLive } from "./services/linear-mcp.js";
 import { GoogleService, GroqService } from "./services/llm.js";
 import { SessionService } from "./services/session.js";
 import { StorageService } from "./services/storage.js";
@@ -66,6 +67,7 @@ const ServicesLive = RequestHandlerService.Default.pipe(
   Layer.provideMerge(StorageLayerLive),
   Layer.provideMerge(VdomService.Default),
   Layer.provideMerge(GenerateService.Default),
+  Layer.provideMerge(LinearMcpServiceLive),
   Layer.provideMerge(LlmLayerLive)
 );
 
