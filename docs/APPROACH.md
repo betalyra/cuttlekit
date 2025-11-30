@@ -339,6 +339,25 @@ const UnifiedResponseSchema = z.union([
 
 ---
 
+## Step 19: Fixed Footer for Reliable Navigation
+
+**Problem:** The AI-generated prompt input and reset button could break or be missing if AI generates malformed HTML.
+
+**Solution:** Move escape hatch controls (prompt input, send, reset) to a fixed client-side footer outside AI-generated content.
+
+**Key changes:**
+- Fixed footer in `index.html` with prompt input, send button, reset button
+- Initial intro HTML defined as constant in frontend (no AI call until first prompt)
+- Removed escape hatch instructions from system prompts
+- AI only generates content inside `#content` div
+
+**Benefits:**
+- Navigation controls always work regardless of AI output
+- System prompt is shorter and fully static (better cache hit rate)
+- First load is instant - no AI call needed
+
+---
+
 ## Key Takeaways
 
 1. **Plain HTML over JSX** - AI can steer a responsive frontend by generating plain HTML
