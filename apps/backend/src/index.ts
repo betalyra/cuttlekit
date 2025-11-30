@@ -1,17 +1,14 @@
 import {
-  HttpApi,
   HttpApiBuilder,
-  HttpApiEndpoint,
-  HttpApiError,
-  HttpApiGroup,
   HttpMiddleware,
   HttpServer,
-  HttpServerResponse,
   KeyValueStore,
 } from "@effect/platform";
 import { NodeHttpServer, NodeRuntime, NodeFileSystem, NodePath } from "@effect/platform-node";
-import { Config, Effect, Layer, Logger, LogLevel, Schema, Stream } from "effect";
+import { Config, Effect, Layer, Logger, LogLevel } from "effect";
 import { createServer } from "node:http";
+
+import { api, healthGroupLive, makeGenerateGroupLive } from "./api.js";
 import { GenerateService } from "./services/generate.js";
 import { GoogleService, GroqService } from "./services/llm.js";
 import { SessionService } from "./services/session.js";
@@ -19,7 +16,6 @@ import { StorageService } from "./services/storage.js";
 import { VdomService } from "./services/vdom.js";
 import { UIService } from "./services/ui.js";
 import { RequestHandlerService } from "./services/request-handler.js";
-import { Request, Response } from "./types/messages.js";
 
 // Storage layer based on STORAGE env var (memory | file)
 const StorageLayerLive = Layer.unwrapEffect(
@@ -42,42 +38,27 @@ const StorageLayerLive = Layer.unwrapEffect(
   })
 );
 
-const api = HttpApi.make("api")
-  .add(
-    HttpApiGroup.make("health").add(
-      HttpApiEndpoint.get("health", "/health").addSuccess(
-        Schema.Struct({
-          status: Schema.String,
-        }),
-        { status: 202 }
-      )
-    )
-  )
-  .add(
-    HttpApiGroup.make("generate")
-      .add(
-        HttpApiEndpoint.post("generate", "/generate")
-          .setPayload(Request)
-          .addSuccess(Response)
-          .addError(HttpApiError.InternalServerError)
-      )
-      .add(
-        HttpApiEndpoint.post("generate-stream", "/generate/stream")
-          .setPayload(Request)
-          .addSuccess(Schema.Unknown)
-          .addError(HttpApiError.InternalServerError)
-      )
-  );
+// LLM provider layer based on LLM_PROVIDER env var (groq | google)
+const LlmLayerLive = Layer.unwrapEffect(
+  Effect.gen(function* () {
+    const selectedProvider = yield* Config.literal(
+      "google",
+      "groq"
+    )("LLM_PROVIDER").pipe(Config.withDefault("groq"));
 
-const healthGroupLive = HttpApiBuilder.group(api, "health", (handlers) =>
-  handlers.handle("health", () =>
-    Effect.succeed({
-      status: "ok",
-    })
-  )
+    if (selectedProvider === "groq") {
+      return GroqService;
+    } else if (selectedProvider === "google") {
+      return GoogleService;
+    } else {
+      return yield* Effect.fail(
+        new Error(`Invalid LLM provider: ${selectedProvider}`)
+      );
+    }
+  })
 );
 
-// Wire up all services using Effect.Service.Default layers
+// Compose all service layers
 const ServicesLive = RequestHandlerService.Default.pipe(
   Layer.provideMerge(UIService.Default),
   Layer.provideMerge(SessionService.Default),
@@ -85,95 +66,16 @@ const ServicesLive = RequestHandlerService.Default.pipe(
   Layer.provideMerge(StorageLayerLive),
   Layer.provideMerge(VdomService.Default),
   Layer.provideMerge(GenerateService.Default),
-  Layer.provideMerge(
-    Layer.unwrapEffect(
-      Effect.gen(function* () {
-        const selectedProvider = yield* Config.literal(
-          "google",
-          "groq"
-        )("LLM_PROVIDER").pipe(Config.withDefault("groq"));
-        if (selectedProvider === "groq") {
-          return GroqService;
-        } else if (selectedProvider === "google") {
-          return GoogleService;
-        } else {
-          return yield* Effect.fail(
-            new Error(`Invalid LLM provider: ${selectedProvider}`)
-          );
-        }
-      })
-    )
-  )
+  Layer.provideMerge(LlmLayerLive)
 );
 
-const textEncoder = new TextEncoder();
-
-const generateGroupLive = HttpApiBuilder.group(api, "generate", (handlers) =>
-  handlers
-    .handle("generate", ({ payload }) =>
-      Effect.gen(function* () {
-        const requestHandler = yield* RequestHandlerService;
-
-        return yield* requestHandler
-          .handleRequest(payload)
-          .pipe(Effect.mapError(() => new HttpApiError.InternalServerError()));
-      })
-    )
-    .handle("generate-stream", ({ payload }) =>
-      Effect.gen(function* () {
-        const uiService = yield* UIService;
-
-        const eventStream = yield* uiService.generateStream({
-          sessionId: payload.sessionId,
-          currentHtml: payload.type === "generate" ? payload.currentHtml : undefined,
-          prompt: payload.type === "generate" ? payload.prompt : payload.type === "update" ? payload.prompt : undefined,
-          action: payload.type === "generate" ? payload.action : undefined,
-          actionData: payload.type === "generate" ? payload.actionData : undefined,
-        });
-
-        const bodyStream = eventStream.pipe(
-          Stream.map((event) => ({
-            event: "message" as const,
-            data: JSON.stringify(event),
-          })),
-          Stream.concat(
-            Stream.make({
-              event: "close" as const,
-              data: undefined as string | undefined,
-            })
-          ),
-          Stream.map((sseEvent) => {
-            const eventLine = `event: ${sseEvent.event}\n`;
-            const dataLine = sseEvent.data ? `data: ${sseEvent.data}\n` : "";
-            return textEncoder.encode(`${eventLine}${dataLine}\n`);
-          }),
-          Stream.catchAll((error) =>
-            Stream.make(
-              textEncoder.encode(
-                `event: error\ndata: ${error instanceof Error ? error.message : String(error)}\n\n`
-              )
-            )
-          )
-        );
-
-        return HttpServerResponse.stream(bodyStream, {
-          contentType: "text/event-stream",
-          headers: {
-            "Content-Type": "text/event-stream",
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-            Connection: "keep-alive",
-          },
-        });
-      }).pipe(Effect.mapError(() => new HttpApiError.InternalServerError()))
-    )
-).pipe(Layer.provide(ServicesLive));
-
+// Compose API layers
 const ApiLive = HttpApiBuilder.api(api).pipe(
   Layer.provide(healthGroupLive),
-  Layer.provide(generateGroupLive)
+  Layer.provide(makeGenerateGroupLive(ServicesLive))
 );
 
+// HTTP server layer
 const HttpLive = HttpApiBuilder.serve(HttpMiddleware.logger).pipe(
   Layer.provide(HttpApiBuilder.middlewareCors()),
   Layer.provide(ApiLive),
@@ -182,4 +84,5 @@ const HttpLive = HttpApiBuilder.serve(HttpMiddleware.logger).pipe(
   Layer.provide(Logger.minimumLogLevel(LogLevel.Debug))
 );
 
+// Launch
 Layer.launch(HttpLive).pipe(NodeRuntime.runMain);

@@ -328,7 +328,20 @@ export class GenerateService extends Effect.Service<GenerateService>()(
             },
           });
 
-          yield* Effect.log("Full HTML generation completed");
+          // Log token usage with cache stats
+          const usage = result.usage;
+          const inputTokens = usage.inputTokens ?? 0;
+          const cachedTokens = usage.cachedInputTokens ?? 0;
+          const cacheHitRate = inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0;
+
+          yield* Effect.log("Full HTML generation completed - Token usage", {
+            inputTokens,
+            outputTokens: usage.outputTokens ?? 0,
+            totalTokens: usage.totalTokens ?? 0,
+            cachedTokens,
+            cacheHitRate: `${cacheHitRate.toFixed(1)}%`,
+          });
+
           return result.text;
         });
 
@@ -381,6 +394,20 @@ export class GenerateService extends Effect.Service<GenerateService>()(
               console.error("Patch generation error:", error);
               return new Error(`Failed to generate patches: ${errorMessage}`);
             },
+          });
+
+          // Log token usage with cache stats
+          const usage = result.usage;
+          const inputTokens = usage.inputTokens ?? 0;
+          const cachedTokens = usage.cachedInputTokens ?? 0;
+          const cacheHitRate = inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0;
+
+          yield* Effect.log("Patch generation - Token usage", {
+            inputTokens,
+            outputTokens: usage.outputTokens ?? 0,
+            totalTokens: usage.totalTokens ?? 0,
+            cachedTokens,
+            cacheHitRate: `${cacheHitRate.toFixed(1)}%`,
           });
 
           // Parse the JSON response
