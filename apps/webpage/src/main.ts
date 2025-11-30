@@ -34,6 +34,16 @@ type StreamEvent =
   | { type: "html"; html: string }
   | { type: "done"; html: string }
 
+// Initial intro HTML - sent as currentHtml on first request
+const INITIAL_HTML = `<div class="flex items-center justify-center min-h-[calc(100vh-4rem)]">
+  <div class="text-center max-w-md px-4">
+    <h1 class="text-2xl font-light text-[#0a0a0a] mb-4">Generative UI</h1>
+    <p class="text-sm text-[#525252] leading-relaxed">
+      Describe what you want to create. A dashboard, a form, a game — anything you can imagine.
+    </p>
+  </div>
+</div>`
+
 const app = {
   sessionId: null as string | null,
   loading: false,
@@ -44,6 +54,9 @@ const app = {
       loadingEl: document.getElementById("loading")!,
       errorEl: document.getElementById("error")!,
       contentEl: document.getElementById("content")!,
+      promptInput: document.getElementById("prompt-input") as HTMLInputElement,
+      sendBtn: document.getElementById("send-btn")!,
+      resetBtn: document.getElementById("reset-btn")!,
     }
   },
 
@@ -290,12 +303,54 @@ const app = {
     })
   },
 
+  // Send prompt from the fixed footer
+  sendPrompt() {
+    const { promptInput } = this.getElements()
+    const prompt = promptInput.value.trim()
+    if (!prompt) return
+
+    promptInput.value = ""
+    this.sendRequest({
+      type: "generate",
+      prompt,
+    })
+  },
+
+  // Reset session and start fresh
+  resetSession() {
+    this.sessionId = null
+    this.getElements().contentEl.innerHTML = INITIAL_HTML
+    this.getElements().promptInput.value = ""
+    this.getElements().promptInput.focus()
+  },
+
   init() {
+    const { promptInput, sendBtn, resetBtn, contentEl } = this.getElements()
+
+    // Show initial intro HTML immediately (no AI request needed)
+    contentEl.innerHTML = INITIAL_HTML
+    this.setLoading(false, true)
+
+    // Footer: Send button
+    sendBtn.addEventListener("click", () => this.sendPrompt())
+
+    // Footer: Reset button
+    resetBtn.addEventListener("click", () => this.resetSession())
+
+    // Footer: Enter key in prompt input
+    promptInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault()
+        this.sendPrompt()
+      }
+    })
+
     // Click handler for buttons/links with data-action (not form inputs)
     document.addEventListener("click", (e) => {
       const target = e.target as HTMLElement
-      // Skip if clicking on a form input - those use the change event
+      // Skip if clicking on a form input or footer elements
       if (target.matches("input, select, textarea")) return
+      if (target.closest("#prompt-footer")) return
 
       const el = target.closest("[data-action]")
       if (el && !el.matches("input, select, textarea")) {
@@ -312,9 +367,12 @@ const app = {
       }
     })
 
-    // Enter key handler
+    // Enter key handler for AI-generated inputs
     document.addEventListener("keydown", (e) => {
       const target = e.target as HTMLElement
+      // Skip the fixed footer prompt input (handled separately)
+      if (target.id === "prompt-input") return
+
       const isInput = target instanceof HTMLInputElement
       const isTextarea = target instanceof HTMLTextAreaElement
 
@@ -339,8 +397,8 @@ const app = {
       }
     })
 
-    // Initial load
-    this.sendRequest({ type: "generate" }, true)
+    // Focus the prompt input on load
+    promptInput.focus()
   },
 }
 

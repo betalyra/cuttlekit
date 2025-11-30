@@ -105,15 +105,6 @@ When using data-action-data, use HTML entities for quotes:
 - WRONG: data-action-data='{"id":"4"}' or data-action-data="{\"id\":\"4\"}"
 Always use &quot; for quotes inside attribute values.
 
-CRITICAL - ESCAPE HATCH:
-ALWAYS include a way for the user to request changes or reset. Options:
-1. A prompt input field (id="prompt") with a "Generate" button (data-action="generate") - preferred
-2. At minimum: a small "Reset" or "New" button in a corner (data-action="reset")
-This ensures the user can always escape from any UI state.
-PLACEMENT: Put the prompt input in a fixed footer at the bottom of the page (position: fixed, bottom: 0).
-Keep it minimal and unobtrusive so it doesn't interfere with the main UI content.
-Only place it elsewhere if the user explicitly requests a different layout.
-
 ICONS:
 Use Iconify web component for icons (loaded on-demand):
 - <iconify-icon icon="mdi:home"></iconify-icon>
@@ -238,9 +229,6 @@ This is REQUIRED for the patch system to work correctly.
 CRITICAL - JSON IN ATTRIBUTES:
 Use &quot; for quotes inside data-action-data attribute values.
 
-CRITICAL - ESCAPE HATCH:
-ALWAYS include a prompt input (id="prompt") with a "Generate" button (data-action="generate") in a fixed footer.
-
 ICONS:
 Use Iconify: <iconify-icon icon="mdi:home"></iconify-icon>
 Popular sets: mdi, lucide, tabler, ph
@@ -301,11 +289,9 @@ export class GenerateService extends Effect.Service<GenerateService>()(
           } else {
             userMessageParts.push({
               type: "text",
-              text: `Generate an initial welcome page for this generative UI system with:
-1. Welcome message explaining this is a generative UI system
-2. Input field for describing changes
-3. "Generate" button with data-action="generate"
-4. Cyber-minimalist design (monochromatic, clean lines, lots of whitespace)`,
+              text: `Generate a simple centered welcome message for a generative UI system.
+Keep it minimal: just a heading and a short description explaining that users can describe what they want to create.
+Cyber-minimalist design (monochromatic, clean lines, lots of whitespace).`,
             });
           }
 
@@ -430,118 +416,6 @@ export class GenerateService extends Effect.Service<GenerateService>()(
           return patches;
         });
 
-      const streamPatches = (
-        options: GeneratePatchesOptions
-      ): Effect.Effect<Stream.Stream<Patch, Error>, Error> =>
-        Effect.gen(function* () {
-          yield* Effect.log("Streaming patches", {
-            action: options.action,
-            hasErrors: options.previousErrors?.length ?? 0,
-          });
-
-          const {
-            currentHtml,
-            action,
-            actionData,
-            previousErrors = [],
-          } = options;
-
-          const userMessageParts = [
-            `CURRENT HTML:\n${currentHtml}`,
-            `ACTION TRIGGERED: ${action}\nACTION DATA: ${JSON.stringify(
-              actionData,
-              null,
-              0
-            )}`,
-          ];
-
-          if (previousErrors.length > 0) {
-            userMessageParts.push(
-              `YOUR PREVIOUS PATCHES FAILED:\n${previousErrors.join(
-                "\n"
-              )}\n\nPlease generate corrected patches. Make sure selectors match existing elements.`
-            );
-          }
-
-          const messages = [
-            { role: "system" as const, content: PATCH_SYSTEM_PROMPT },
-            { role: "user" as const, content: userMessageParts.join("\n\n") },
-          ];
-
-          const result = streamObject({
-            model: llm.provider.languageModel("openai/gpt-oss-20b"),
-            messages,
-            schema: PatchArraySchema,
-            mode: "json",
-          });
-
-          // Track which patches we've already emitted
-          let emittedCount = 0;
-
-          // Convert partial object stream to stream of individual patches
-          const effectStream = Stream.fromAsyncIterable(
-            safeAsyncIterable(result.partialObjectStream),
-            (error) =>
-              error instanceof Error
-                ? error
-                : new Error(`Stream error: ${String(error)}`)
-          ).pipe(
-            Stream.mapConcatEffect((partialArray) =>
-              Effect.gen(function* () {
-                yield* Effect.logDebug("[streamPatches] Received partial", {
-                  isArray: Array.isArray(partialArray),
-                  length: Array.isArray(partialArray) ? partialArray.length : 0,
-                  emittedCount,
-                  raw: JSON.stringify(partialArray)?.slice(0, 200),
-                });
-
-                if (!partialArray) {
-                  return [];
-                }
-
-                // Handle both array and single object responses
-                const patchArray = Array.isArray(partialArray)
-                  ? partialArray
-                  : [partialArray];
-                const newPatches = patchArray.slice(emittedCount);
-                emittedCount = patchArray.length;
-
-                const validPatches = yield* pipe(
-                  newPatches,
-                  Effect.forEach((p) =>
-                    Effect.gen(function* () {
-                      const result = PatchSchema.safeParse(p);
-                      if (!result.success) {
-                        yield* Effect.logDebug(
-                          "[streamPatches] Invalid patch",
-                          {
-                            patch: p,
-                            error: result.error.message,
-                          }
-                        );
-                        return null;
-                      }
-                      return result.data as Patch;
-                    })
-                  ),
-                  Effect.map((results: (Patch | null)[]) =>
-                    results.filter((p): p is Patch => p !== null)
-                  )
-                );
-
-                if (validPatches.length > 0) {
-                  yield* Effect.logDebug("[streamPatches] Emitting patches", {
-                    patches: validPatches,
-                  });
-                }
-                return validPatches;
-              })
-            )
-          );
-
-          return effectStream;
-        });
-
       const streamUnified = (
         options: UnifiedGenerateOptions
       ): Effect.Effect<Stream.Stream<UnifiedResponse, Error>, Error> =>
@@ -571,11 +445,9 @@ export class GenerateService extends Effect.Service<GenerateService>()(
 
           const defaultPart =
             !currentHtml && !prompt && !action
-              ? `Generate an initial welcome page for this generative UI system with:
-1. Welcome message explaining this is a generative UI system
-2. Input field for describing changes
-3. "Generate" button with data-action="generate"
-4. Cyber-minimalist design (monochromatic, clean lines, lots of whitespace)`
+              ? `Generate a simple centered welcome message for a generative UI system.
+Keep it minimal: just a heading and a short description explaining that users can describe what they want to create.
+Cyber-minimalist design (monochromatic, clean lines, lots of whitespace).`
               : null;
 
           const userMessage = [contextPart, actionPart, promptPart, defaultPart]
@@ -679,7 +551,6 @@ export class GenerateService extends Effect.Service<GenerateService>()(
       return {
         generateFullHtml,
         generatePatches,
-        streamPatches,
         streamUnified,
       };
     }),
