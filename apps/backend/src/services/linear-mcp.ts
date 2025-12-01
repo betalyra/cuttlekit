@@ -2,7 +2,9 @@ import { Config, Context, Effect, Layer, Redacted } from "effect";
 import { experimental_createMCPClient as createMCPClient } from "@ai-sdk/mcp";
 
 // Use the return type of client.tools() directly
-type McpToolSet = Awaited<ReturnType<Awaited<ReturnType<typeof createMCPClient>>["tools"]>>;
+type McpToolSet = Awaited<
+  ReturnType<Awaited<ReturnType<typeof createMCPClient>>["tools"]>
+>;
 
 export type ILinearMcpService = {
   tools: McpToolSet;
