@@ -15,11 +15,13 @@
     "dev:common": "pnpm --filter @betalyra/generative-ui-common dev",
     "build:common": "pnpm --filter @betalyra/generative-ui-common build",
     "preview:common": "pnpm --filter @betalyra/generative-ui-common preview",
-    "dev:vdom-demo": "tsx scripts/vdom-demo.ts"
+    "dev:vdom-demo": "tsx scripts/vdom-demo.ts",
+    "bench": "tsx scripts/bench.ts"
   },
   "devDependencies": {
     "@types/alpinejs": "^3.13.11",
     "@types/node": "^24.10.1",
+    "tinybench": "^6.0.0",
     "tsx": "^4.20.6",
     "typescript": "~5.9.3",
     "vite": "npm:rolldown-vite@7.2.5"

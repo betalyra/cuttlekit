@@ -318,7 +318,8 @@ Cyber-minimalist design (monochromatic, clean lines, lots of whitespace).`,
           const usage = result.usage;
           const inputTokens = usage.inputTokens ?? 0;
           const cachedTokens = usage.cachedInputTokens ?? 0;
-          const cacheHitRate = inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0;
+          const cacheHitRate =
+            inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0;
 
           yield* Effect.log("Full HTML generation completed - Token usage", {
             inputTokens,
@@ -386,7 +387,8 @@ Cyber-minimalist design (monochromatic, clean lines, lots of whitespace).`,
           const usage = result.usage;
           const inputTokens = usage.inputTokens ?? 0;
           const cachedTokens = usage.cachedInputTokens ?? 0;
-          const cacheHitRate = inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0;
+          const cacheHitRate =
+            inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0;
 
           yield* Effect.log("Patch generation - Token usage", {
             inputTokens,
@@ -487,6 +489,9 @@ Cyber-minimalist design (monochromatic, clean lines, lots of whitespace).`
                 ? error
                 : new Error(`Stream error: ${String(error)}`)
           ).pipe(
+            Stream.tap((partial) =>
+              Effect.logDebug("Patch", JSON.stringify(partial))
+            ),
             Stream.mapConcatEffect((partial) =>
               Effect.gen(function* () {
                 // Try parsing as patches mode
@@ -526,13 +531,17 @@ Cyber-minimalist design (monochromatic, clean lines, lots of whitespace).`
                 return [];
               })
             ),
+            Stream.tap((response) =>
+              Effect.logDebug("Response", JSON.stringify(response))
+            ),
             Stream.ensuring(
               Effect.gen(function* () {
                 const usage = yield* Effect.promise(() => result.usage);
 
                 const inputTokens = usage.inputTokens ?? 0;
                 const cachedTokens = usage.cachedInputTokens ?? 0;
-                const cacheHitRate = inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0;
+                const cacheHitRate =
+                  inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0;
 
                 yield* Effect.log("Stream completed - Token usage", {
                   inputTokens,
