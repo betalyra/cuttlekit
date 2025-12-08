@@ -59,14 +59,25 @@ const LlmLayerLive = Layer.unwrapEffect(
 );
 
 // Compose all service layers
+// Build from dependencies up: base infra → services → handlers
+const StorageWithKV = StorageService.Default.pipe(
+  Layer.provide(StorageLayerLive)
+);
+
+const GenerateWithDeps = GenerateService.Default.pipe(
+  Layer.provide(StorageWithKV),
+  Layer.provide(LlmLayerLive)
+);
+
+const UIWithDeps = UIService.Default.pipe(
+  Layer.provide(GenerateWithDeps),
+  Layer.provide(StorageWithKV),
+  Layer.provide(SessionService.Default),
+  Layer.provide(VdomService.Default)
+);
+
 const ServicesLive = RequestHandlerService.Default.pipe(
-  Layer.provideMerge(UIService.Default),
-  Layer.provideMerge(SessionService.Default),
-  Layer.provideMerge(StorageService.Default),
-  Layer.provideMerge(StorageLayerLive),
-  Layer.provideMerge(VdomService.Default),
-  Layer.provideMerge(GenerateService.Default),
-  Layer.provideMerge(LlmLayerLive)
+  Layer.provide(UIWithDeps)
 );
 
 // Compose API layers

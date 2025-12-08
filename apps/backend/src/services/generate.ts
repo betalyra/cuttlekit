@@ -1,7 +1,8 @@
-import { Effect, Stream, pipe } from "effect";
-import { generateText, streamObject, ModelMessage, TextPart } from "ai";
+import { Array as A, Effect, Stream, pipe } from "effect";
+import { generateText, ModelMessage, TextPart, streamText } from "ai";
 import { z } from "zod";
 import { LlmProvider } from "./llm.js";
+import { StorageService } from "./storage.js";
 import type { Patch } from "./vdom.js";
 
 // Wrap async iterable to handle AI SDK cleanup errors gracefully
@@ -176,73 +177,47 @@ Example for deleting a todo:
 
 Output ONLY the JSON array, no explanation, no markdown.`;
 
-// Unified system prompt - AI decides mode
-const UNIFIED_SYSTEM_PROMPT = `You are a Generative UI Engine that creates and updates interactive web interfaces.
+// Streaming system prompt - outputs patches as minified JSON lines
+const STREAMING_PATCH_PROMPT = `You are a UI Patch Engine. Generate minimal patches to update the UI.
 
 OUTPUT FORMAT:
-Return a JSON object with one of these structures:
+Output one minified JSON object per line. Each line must be a complete, valid JSON object:
+{"mode":"patches","patches":[{"selector":"#id","text":"new value"}]}
+{"mode":"patches","patches":[{"selector":"#list","append":"<li>item</li>"}]}
 
-1. PATCHES MODE (for small, targeted updates):
-{"mode": "patches", "patches": [
-  {"selector": "#id", "text": "new text"},
-  {"selector": "#id", "attr": {"class": "new-class"}},
-  {"selector": "#list", "append": "<li>new</li>"},
-  {"selector": "#id", "remove": true}
-]}
-
-2. FULL HTML MODE (for new UIs or major changes):
-{"mode": "full", "html": "<div>...complete HTML...</div>"}
-
-WHEN TO USE EACH MODE:
-- Use PATCHES for: counter increments, checkbox toggles, adding/removing list items, style changes to specific elements
-- Use FULL HTML for: initial page generation, major redesigns, when the request affects most of the page, or when no current HTML exists
+RULES:
+- Each line is a SEPARATE batch of patches that can be applied immediately
+- Keep each line minimal - group related patches together
+- NO spaces or formatting - minified JSON only
+- Each line must end with a newline character
 
 PATCH TYPES:
-- {"selector": "#id", "text": "new text"} - Set text content
-- {"selector": "#id", "html": "<div>...</div>"} - Replace innerHTML
-- {"selector": "#id", "attr": {"class": "x", "style": "..."}} - Set attributes (null removes)
-- {"selector": "#list", "append": "<li>...</li>"} - Append child
-- {"selector": "#list", "prepend": "<li>...</li>"} - Prepend child
-- {"selector": "#id", "remove": true} - Remove element
+- {"selector":"#id","text":"new text"} - Set text content
+- {"selector":"#id","html":"<div>...</div>"} - Replace innerHTML
+- {"selector":"#id","attr":{"class":"x","disabled":null}} - Set/remove attributes
+- {"selector":"#list","append":"<li>...</li>"} - Append child
+- {"selector":"#list","prepend":"<li>...</li>"} - Prepend child
+- {"selector":"#id","remove":true} - Remove element
 
-PATCH RULES:
+SELECTOR RULES:
 - Use simple ID selectors (#id) - complex selectors will fail
 - Check the CURRENT HTML for actual element IDs before patching
-- For multiple style changes, batch them in one patch with the html type on a container
+- For checkboxes: use attr with "checked":"checked" to check, "checked":null to uncheck
 
-HTML RULES (when mode is "full"):
-- Return ONLY raw HTML - no markdown, no code blocks
-- Do NOT include <html>, <head>, <body>, <script>, or <style> tags
-- Start directly with a <div> element
-- Style with Tailwind CSS utility classes
+HTML IN PATCHES:
+When including HTML in patches, use escaped quotes for attributes:
+{"selector":"#list","append":"<li id=\\"item-1\\">Text</li>"}
 
-INTERACTIVITY:
-Use data-action attributes for interactive elements:
-- <button data-action="increment">+</button>
-- <button id="delete-123" data-action="delete" data-action-data="{&quot;id&quot;:&quot;123&quot;}">Delete</button>
-- <input type="checkbox" id="todo-1-checkbox" data-action="toggle" data-action-data="{&quot;id&quot;:&quot;1&quot;}">
-
-CRITICAL - UNIQUE IDs:
-ALWAYS add unique id attributes to ALL interactive and dynamic elements.
-This is REQUIRED for the patch system to work correctly.
-
-CRITICAL - JSON IN ATTRIBUTES:
-Use &quot; for quotes inside data-action-data attribute values.
+For data-action-data, use &quot; for inner quotes:
+{"selector":"#list","append":"<button data-action-data=\\"{&quot;id&quot;:&quot;1&quot;}\\">Click</button>"}
 
 ICONS:
-Use Iconify: <iconify-icon icon="mdi:home"></iconify-icon>
-Popular sets: mdi, lucide, tabler, ph
+Use Iconify: <iconify-icon icon="mdi:plus"></iconify-icon>
 
-FONTS:
-Use any Google Font by name (loaded on-demand from Fontsource CDN):
-Example: style="font-family: 'Space Grotesk', sans-serif"
-Stick to Inter unless a specific aesthetic is requested.
-
-Design: Light mode (#fafafa background, #0a0a0a text), minimal brutalist UI, generous whitespace.
-
-Output ONLY the JSON object, nothing else.`;
+Output ONLY minified JSON lines, nothing else.`;
 
 export type UnifiedGenerateOptions = {
+  sessionId: string;
   currentHtml?: string;
   prompt?: string;
   action?: string;
@@ -255,6 +230,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
     accessors: true,
     effect: Effect.gen(function* () {
       const llm = yield* LlmProvider;
+      const storage = yield* StorageService;
 
       const generateFullHtml = (options: GenerateOptions) =>
         Effect.gen(function* () {
@@ -420,7 +396,7 @@ Cyber-minimalist design (monochromatic, clean lines, lots of whitespace).`,
 
       const streamUnified = (
         options: UnifiedGenerateOptions
-      ): Effect.Effect<Stream.Stream<UnifiedResponse, Error>, Error> =>
+      ): Effect.Effect<Stream.Stream<UnifiedResponse, Error>> =>
         Effect.gen(function* () {
           yield* Effect.log("Streaming unified response", {
             action: options.action,
@@ -428,111 +404,129 @@ Cyber-minimalist design (monochromatic, clean lines, lots of whitespace).`,
             hasCurrentHtml: !!options.currentHtml,
           });
 
-          const { currentHtml, prompt, action, actionData } = options;
+          const { sessionId, currentHtml, prompt, action, actionData } =
+            options;
 
-          // Build user message parts
-          const contextPart = currentHtml
-            ? `CURRENT HTML:\n${currentHtml}`
-            : "NO CURRENT HTML - this is an initial page generation. You MUST use full mode.";
+          // Fetch prompts and actions separately for optimal caching
+          // Prompts change rarely after creation, actions change frequently
+          const [recentPrompts, recentActions] = yield* Effect.all([
+            storage
+              .getRecentPrompts(sessionId, 3)
+              .pipe(Effect.catchAll(() => Effect.succeed([] as const))),
+            storage
+              .getRecentActions(sessionId, 5)
+              .pipe(Effect.catchAll(() => Effect.succeed([] as const))),
+          ]);
 
-          const actionPart = action
-            ? `ACTION TRIGGERED: ${action}\nACTION DATA: ${JSON.stringify(
+          // Build history messages optimized for Groq prompt caching:
+          // 1. System prompt (static - always cached)
+          // 2. Prompt history (semi-static - high cache hits, rarely changes)
+          // 3. Action summary (dynamic but compact)
+          // 4. Current request (always fresh)
+
+          // Add prompts as separate user messages (stable prefix for caching)
+          const promptMessages = pipe(
+            recentPrompts,
+            A.map((p) => ({
+              role: "user" as const,
+              content: `USER REQUEST: ${p.content}`,
+            }))
+          );
+
+          // Add action summary as single compact message (changes frequently)
+          const actionMessage =
+            recentActions.length > 0
+              ? [
+                  {
+                    role: "user" as const,
+                    content: `RECENT ACTIONS: ${pipe(
+                      recentActions,
+                      A.map(
+                        (a) =>
+                          `${a.action}${
+                            a.data ? `(${JSON.stringify(a.data)})` : ""
+                          }`
+                      ),
+                      (actions) => actions.join(", ")
+                    )}`,
+                  },
+                ]
+              : [];
+
+          const historyMessages = [...promptMessages, ...actionMessage];
+
+          // Build current user message (dynamic - placed last)
+          const currentMessageParts: string[] = [];
+          if (currentHtml) {
+            currentMessageParts.push(`CURRENT HTML:\n${currentHtml}`);
+          }
+          if (action) {
+            currentMessageParts.push(
+              `ACTION TRIGGERED: ${action}\nACTION DATA: ${JSON.stringify(
                 actionData,
                 null,
                 0
               )}`
-            : null;
-
-          const promptPart = prompt ? `USER REQUEST: ${prompt}` : null;
-
-          const defaultPart =
-            !currentHtml && !prompt && !action
-              ? `Generate a simple centered welcome message for a generative UI system.
-Keep it minimal: just a heading and a short description explaining that users can describe what they want to create.
-Cyber-minimalist design (monochromatic, clean lines, lots of whitespace).`
-              : null;
-
-          const userMessage = [contextPart, actionPart, promptPart, defaultPart]
-            .filter((p): p is string => p !== null)
-            .join("\n\n");
+            );
+          }
+          if (prompt) {
+            currentMessageParts.push(`USER REQUEST: ${prompt}`);
+          }
 
           const messages = [
-            { role: "system" as const, content: UNIFIED_SYSTEM_PROMPT },
-            { role: "user" as const, content: userMessage },
+            { role: "system" as const, content: STREAMING_PATCH_PROMPT },
+            ...historyMessages,
+            {
+              role: "user" as const,
+              content: currentMessageParts.join("\n\n"),
+            },
           ];
 
-          const result = streamObject({
+          const result = streamText({
             model: llm.provider.languageModel("openai/gpt-oss-20b"),
             messages,
-            schema: UnifiedResponseSchema,
-            mode: "json",
           });
 
-          // Partial schemas for streaming validation
-          const PartialPatchesSchema = z.object({
-            mode: z.literal("patches"),
-            patches: z.array(z.unknown()),
-          });
+          const parseJsonLine = (line: string) =>
+            Effect.try({
+              try: () => JSON.parse(line) as UnifiedResponse,
+              catch: () => new Error(`Failed to parse JSON line: ${line}`),
+            });
 
-          const FullHtmlSchema = z.object({
-            mode: z.literal("full"),
-            html: z.string(),
-          });
-
-          let emittedPatchCount = 0;
-          let emittedFull = false;
-
-          const effectStream = Stream.fromAsyncIterable(
-            safeAsyncIterable(result.partialObjectStream),
+          // Token stream from LLM
+          const tokenStream = Stream.fromAsyncIterable(
+            safeAsyncIterable(result.textStream),
             (error) =>
               error instanceof Error
                 ? error
                 : new Error(`Stream error: ${String(error)}`)
-          ).pipe(
-            Stream.tap((partial) =>
-              Effect.logDebug("Patch", JSON.stringify(partial))
-            ),
-            Stream.mapConcatEffect((partial) =>
-              Effect.gen(function* () {
-                // Try parsing as patches mode
-                const patchesResult = PartialPatchesSchema.safeParse(partial);
-                if (patchesResult.success) {
-                  const newPatches =
-                    patchesResult.data.patches.slice(emittedPatchCount);
-                  const validatedPatches = yield* pipe(
-                    newPatches,
-                    Effect.forEach((p) =>
-                      Effect.sync(() => PatchSchema.safeParse(p))
-                    ),
-                    Effect.map((results) =>
-                      results
-                        .filter((r) => r.success)
-                        .map((r) => r.data as Patch)
-                    )
-                  );
+          );
 
-                  emittedPatchCount += validatedPatches.length;
+          // Append trailing newline to flush any remaining buffer content
+          const tokenStreamWithFlush = pipe(
+            tokenStream,
+            Stream.concat(Stream.make("\n"))
+          );
 
-                  return validatedPatches.map(
-                    (patch): UnifiedResponse => ({
-                      mode: "patches",
-                      patches: [patch],
-                    })
-                  );
-                }
-
-                // Try parsing as full HTML mode
-                const fullResult = FullHtmlSchema.safeParse(partial);
-                if (fullResult.success && !emittedFull) {
-                  emittedFull = true;
-                  return [fullResult.data];
-                }
-
-                return [];
-              })
-            ),
+          const effectStream = pipe(
+            tokenStreamWithFlush,
+            // Buffer tokens until newline, emit completed lines immediately
+            Stream.mapAccum("", (buffer, token) => {
+              const combined = buffer + token;
+              const parts = combined.split("\n");
+              const completedLines = parts.slice(0, -1);
+              const newBuffer = parts[parts.length - 1];
+              return [newBuffer, completedLines] as const;
+            }),
+            // Flatten array of lines into individual line emissions
+            Stream.mapConcat((lines) => lines),
+            // Filter out empty lines
+            Stream.filter((line) => line.trim().length > 0),
+            // Parse each line as JSON
+            Stream.mapEffect((line) => parseJsonLine(line)),
+            // Log parsed response
             Stream.tap((response) =>
-              Effect.logDebug("Response", JSON.stringify(response))
+              Effect.logDebug("Parsed response", { response })
             ),
             Stream.ensuring(
               Effect.gen(function* () {
@@ -542,6 +536,18 @@ Cyber-minimalist design (monochromatic, clean lines, lots of whitespace).`
                 const cachedTokens = usage.cachedInputTokens ?? 0;
                 const cacheHitRate =
                   inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0;
+
+                // Store prompt and action separately for optimal caching
+                if (prompt) {
+                  yield* storage
+                    .addPrompt(sessionId, prompt)
+                    .pipe(Effect.catchAll(() => Effect.void));
+                }
+                if (action) {
+                  yield* storage
+                    .addAction(sessionId, action, actionData)
+                    .pipe(Effect.catchAll(() => Effect.void));
+                }
 
                 yield* Effect.log("Stream completed - Token usage", {
                   inputTokens,

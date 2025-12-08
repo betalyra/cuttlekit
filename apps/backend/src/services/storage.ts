@@ -1,59 +1,69 @@
 import { KeyValueStore } from "@effect/platform";
 import { PlatformError } from "@effect/platform/Error";
-import { DateTime, Effect, Option, Schema, Data } from "effect";
+import { DateTime, Effect, Option, Schema, Data, pipe } from "effect";
 
-// Effect Schema definitions
-const StoredMessageSchema = Schema.Struct({
-  role: Schema.Literal("user", "assistant"),
+// Prompt schema - user descriptions of what to create/change
+const StoredPromptSchema = Schema.Struct({
   content: Schema.String,
   timestamp: Schema.Number,
   embedding: Schema.optional(Schema.Array(Schema.Number)),
 });
 
-const SessionDataSchema = Schema.Struct({
-  messages: Schema.Array(StoredMessageSchema),
-  summary: Schema.optional(Schema.String),
-  facts: Schema.optional(
-    Schema.Record({ key: Schema.String, value: Schema.Unknown })
-  ),
-  meta: Schema.optional(
-    Schema.Struct({
-      lastCompaction: Schema.optional(Schema.Number),
-      totalTokensEstimate: Schema.optional(Schema.Number),
-      messageCount: Schema.optional(Schema.Number),
-    })
-  ),
+// Action schema - user interactions with the UI
+const StoredActionSchema = Schema.Struct({
+  action: Schema.String,
+  data: Schema.optional(Schema.Unknown),
+  timestamp: Schema.Number,
 });
 
-export type StoredMessage = typeof StoredMessageSchema.Type;
-export type SessionData = typeof SessionDataSchema.Type;
+// Prompt list schema
+const PromptListSchema = Schema.Struct({
+  prompts: Schema.Array(StoredPromptSchema),
+  summary: Schema.optional(Schema.String),
+});
+
+// Action list schema
+const ActionListSchema = Schema.Struct({
+  actions: Schema.Array(StoredActionSchema),
+  summary: Schema.optional(Schema.String),
+});
+
+export type StoredPrompt = typeof StoredPromptSchema.Type;
+export type StoredAction = typeof StoredActionSchema.Type;
+export type PromptList = typeof PromptListSchema.Type;
+export type ActionList = typeof ActionListSchema.Type;
 
 export class StorageParseError extends Data.TaggedError("StorageParseError")<{
   readonly message: string;
   readonly cause?: unknown;
 }> {}
 
-const SESSION_PREFIX = "session:";
+// Key prefixes for separate storage
+const PROMPTS_PREFIX = "prompts:";
+const ACTIONS_PREFIX = "actions:";
 
-const sessionKey = (sessionId: string) => `${SESSION_PREFIX}${sessionId}`;
+const promptsKey = (sessionId: string) => `${PROMPTS_PREFIX}${sessionId}`;
+const actionsKey = (sessionId: string) => `${ACTIONS_PREFIX}${sessionId}`;
 
-const decodeSessionData = Schema.decodeUnknown(SessionDataSchema);
+const decodePromptList = Schema.decodeUnknown(PromptListSchema);
+const decodeActionList = Schema.decodeUnknown(ActionListSchema);
 
-const parseSessionData = (value: string) =>
-  Effect.try({
-    try: () => JSON.parse(value),
-    catch: (error) =>
-      new StorageParseError({
-        message: "Failed to parse JSON",
-        cause: error,
-      }),
-  }).pipe(
+const parseJson = <T>(value: string, decoder: (v: unknown) => Effect.Effect<T, unknown>) =>
+  pipe(
+    Effect.try({
+      try: () => JSON.parse(value),
+      catch: (error) =>
+        new StorageParseError({
+          message: "Failed to parse JSON",
+          cause: error,
+        }),
+    }),
     Effect.flatMap((parsed) =>
-      decodeSessionData(parsed).pipe(
+      decoder(parsed).pipe(
         Effect.mapError(
           (error) =>
             new StorageParseError({
-              message: "Invalid session data schema",
+              message: "Invalid schema",
               cause: error,
             })
         )
@@ -68,119 +78,132 @@ export class StorageService extends Effect.Service<StorageService>()(
     effect: Effect.gen(function* () {
       const kv = yield* KeyValueStore.KeyValueStore;
 
-      const getSession = (
+      // ============ PROMPTS ============
+
+      const getPrompts = (
         sessionId: string
-      ): Effect.Effect<
-        Option.Option<SessionData>,
-        PlatformError | StorageParseError
-      > =>
+      ): Effect.Effect<PromptList, PlatformError | StorageParseError> =>
         Effect.gen(function* () {
-          const result = yield* kv.get(sessionKey(sessionId));
+          const result = yield* kv.get(promptsKey(sessionId));
           return yield* Option.match(result, {
-            onNone: () => Effect.succeed(Option.none()),
-            onSome: (value) =>
-              parseSessionData(value).pipe(Effect.map(Option.some)),
+            onNone: () => Effect.succeed({ prompts: [] }),
+            onSome: (value) => parseJson(value, decodePromptList),
           });
         });
 
-      const setSession = (
+      const getRecentPrompts = (
         sessionId: string,
-        data: SessionData
-      ): Effect.Effect<void, PlatformError> =>
-        kv.set(sessionKey(sessionId), JSON.stringify(data));
+        count: number
+      ): Effect.Effect<readonly StoredPrompt[], PlatformError | StorageParseError> =>
+        Effect.gen(function* () {
+          const data = yield* getPrompts(sessionId);
+          return data.prompts.slice(-count);
+        });
+
+      const addPrompt = (
+        sessionId: string,
+        content: string
+      ): Effect.Effect<void, PlatformError | StorageParseError> =>
+        Effect.gen(function* () {
+          const now = yield* DateTime.now;
+          const timestamp = DateTime.toEpochMillis(now);
+          const data = yield* getPrompts(sessionId);
+          const updated: PromptList = {
+            ...data,
+            prompts: [...data.prompts, { content, timestamp }],
+          };
+          yield* kv.set(promptsKey(sessionId), JSON.stringify(updated));
+        });
+
+      const setPromptSummary = (
+        sessionId: string,
+        summary: string,
+        keepRecent: number
+      ): Effect.Effect<void, PlatformError | StorageParseError> =>
+        Effect.gen(function* () {
+          const data = yield* getPrompts(sessionId);
+          const updated: PromptList = {
+            prompts: data.prompts.slice(-keepRecent),
+            summary,
+          };
+          yield* kv.set(promptsKey(sessionId), JSON.stringify(updated));
+        });
+
+      // ============ ACTIONS ============
+
+      const getActions = (
+        sessionId: string
+      ): Effect.Effect<ActionList, PlatformError | StorageParseError> =>
+        Effect.gen(function* () {
+          const result = yield* kv.get(actionsKey(sessionId));
+          return yield* Option.match(result, {
+            onNone: () => Effect.succeed({ actions: [] }),
+            onSome: (value) => parseJson(value, decodeActionList),
+          });
+        });
+
+      const getRecentActions = (
+        sessionId: string,
+        count: number
+      ): Effect.Effect<readonly StoredAction[], PlatformError | StorageParseError> =>
+        Effect.gen(function* () {
+          const data = yield* getActions(sessionId);
+          return data.actions.slice(-count);
+        });
+
+      const addAction = (
+        sessionId: string,
+        action: string,
+        data?: unknown
+      ): Effect.Effect<void, PlatformError | StorageParseError> =>
+        Effect.gen(function* () {
+          const now = yield* DateTime.now;
+          const timestamp = DateTime.toEpochMillis(now);
+          const existing = yield* getActions(sessionId);
+          const updated: ActionList = {
+            ...existing,
+            actions: [...existing.actions, { action, data, timestamp }],
+          };
+          yield* kv.set(actionsKey(sessionId), JSON.stringify(updated));
+        });
+
+      const setActionSummary = (
+        sessionId: string,
+        summary: string,
+        keepRecent: number
+      ): Effect.Effect<void, PlatformError | StorageParseError> =>
+        Effect.gen(function* () {
+          const data = yield* getActions(sessionId);
+          const updated: ActionList = {
+            actions: data.actions.slice(-keepRecent),
+            summary,
+          };
+          yield* kv.set(actionsKey(sessionId), JSON.stringify(updated));
+        });
+
+      // ============ SESSION MANAGEMENT ============
 
       const deleteSession = (
         sessionId: string
-      ): Effect.Effect<void, PlatformError> => kv.remove(sessionKey(sessionId));
-
-      const updateSession = (
-        sessionId: string,
-        updater: (data: SessionData) => SessionData
-      ): Effect.Effect<void, PlatformError | StorageParseError> =>
-        Effect.gen(function* () {
-          const existing = yield* getSession(sessionId);
-          const current = Option.getOrElse(existing, () => ({ messages: [] }));
-          const updated = updater(current);
-          yield* setSession(sessionId, updated);
-        });
-
-      const addMessage = (
-        sessionId: string,
-        message: StoredMessage
-      ): Effect.Effect<void, PlatformError | StorageParseError> =>
-        Effect.gen(function* () {
-          const now = yield* DateTime.now;
-          const timestamp = DateTime.toEpochMillis(now);
-          yield* updateSession(sessionId, (data) => ({
-            ...data,
-            messages: [...data.messages, { ...message, timestamp }],
-            meta: {
-              ...data.meta,
-              messageCount:
-                (data.meta?.messageCount ?? data.messages.length) + 1,
-            },
-          }));
-        });
-
-      const getMessages = (
-        sessionId: string
-      ): Effect.Effect<
-        readonly StoredMessage[],
-        PlatformError | StorageParseError
-      > =>
-        Effect.gen(function* () {
-          const data = yield* getSession(sessionId);
-          return Option.match(data, {
-            onNone: () => [],
-            onSome: (session) => session.messages,
-          });
-        });
-
-      const setSummary = (
-        sessionId: string,
-        summary: string
-      ): Effect.Effect<void, PlatformError | StorageParseError> =>
-        Effect.gen(function* () {
-          const now = yield* DateTime.now;
-          const timestamp = DateTime.toEpochMillis(now);
-          yield* updateSession(sessionId, (data) => ({
-            ...data,
-            summary,
-            meta: {
-              ...data.meta,
-              lastCompaction: timestamp,
-            },
-          }));
-        });
-
-      const compactMessages = (
-        sessionId: string,
-        keepRecent: number,
-        summary: string
-      ): Effect.Effect<void, PlatformError | StorageParseError> =>
-        Effect.gen(function* () {
-          const now = yield* DateTime.now;
-          const timestamp = DateTime.toEpochMillis(now);
-          yield* updateSession(sessionId, (data) => ({
-            ...data,
-            messages: data.messages.slice(-keepRecent),
-            summary,
-            meta: {
-              ...data.meta,
-              lastCompaction: timestamp,
-            },
-          }));
-        });
+      ): Effect.Effect<void, PlatformError> =>
+        Effect.all([
+          kv.remove(promptsKey(sessionId)),
+          kv.remove(actionsKey(sessionId)),
+        ]).pipe(Effect.asVoid);
 
       return {
-        getSession,
-        setSession,
+        // Prompts
+        getPrompts,
+        getRecentPrompts,
+        addPrompt,
+        setPromptSummary,
+        // Actions
+        getActions,
+        getRecentActions,
+        addAction,
+        setActionSummary,
+        // Session
         deleteSession,
-        updateSession,
-        addMessage,
-        getMessages,
-        setSummary,
-        compactMessages,
       };
     }),
   }

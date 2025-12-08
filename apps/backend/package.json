@@ -8,8 +8,6 @@
         "build": "tsdown"
     },
     "dependencies": {
-        "@ai-sdk/provider": "3.0.0-beta.20",
-        "@betalyra/generative-ui-common": "workspace:*",
-        "zod": "^4.1.13"
+        "@betalyra/generative-ui-common": "workspace:*"
     }
 }

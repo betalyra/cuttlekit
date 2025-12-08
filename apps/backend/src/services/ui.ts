@@ -1,4 +1,4 @@
-import { DateTime, Effect, Stream } from "effect";
+import { Effect, Stream } from "effect";
 import { GenerateService, type UnifiedResponse } from "./generate.js";
 import { SessionService } from "./session.js";
 import { StorageService } from "./storage.js";
@@ -58,14 +58,9 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
       Effect.gen(function* () {
         const { prompt, action, actionData, currentHtml, isReset } = options;
 
-        // Add user message to history
+        // Add user prompt to history
         if (prompt) {
-          const now = yield* DateTime.now;
-          yield* storageService.addMessage(sessionId, {
-            role: "user",
-            content: prompt,
-            timestamp: DateTime.toEpochMillis(now),
-          });
+          yield* storageService.addPrompt(sessionId, prompt);
         }
 
         // Generate HTML
@@ -78,14 +73,6 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
 
         // Store in VDOM
         yield* vdomService.setHtml(sessionId, html);
-
-        // Add to history
-        const nowAssistant = yield* DateTime.now;
-        yield* storageService.addMessage(sessionId, {
-          role: "assistant",
-          content: `[Generated UI: ${html.slice(0, 100)}...]`,
-          timestamp: DateTime.toEpochMillis(nowAssistant),
-        });
 
         return html;
       });
@@ -102,12 +89,7 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
         const { action, actionData, currentHtml } = options;
 
         // Add action to history
-        const now = yield* DateTime.now;
-        yield* storageService.addMessage(sessionId, {
-          role: "user",
-          content: `[Action: ${action}] ${JSON.stringify(actionData || {})}`,
-          timestamp: DateTime.toEpochMillis(now),
-        });
+        yield* storageService.addAction(sessionId, action, actionData);
 
         // Try patch generation with retries
         let lastErrors: string[] = [];
@@ -128,14 +110,6 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
 
           if (result.errors.length === 0) {
             yield* Effect.log("Patches applied successfully");
-
-            const nowPatches = yield* DateTime.now;
-            yield* storageService.addMessage(sessionId, {
-              role: "assistant",
-              content: `[Applied ${result.applied} patches]`,
-              timestamp: DateTime.toEpochMillis(nowPatches),
-            });
-
             return { success: true as const, html: result.html };
           }
 
@@ -218,13 +192,6 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
             currentHtml,
           });
 
-          const nowFallback = yield* DateTime.now;
-          yield* storageService.addMessage(sessionId, {
-            role: "assistant",
-            content: `[Fallback: regenerated full UI]`,
-            timestamp: DateTime.toEpochMillis(nowFallback),
-          });
-
           return { html, sessionId };
         }
 
@@ -258,25 +225,10 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
           yield* Effect.log("Session reset, generating fresh UI");
         }
 
-        // Add user message to history
-        if (prompt) {
-          const nowPrompt = yield* DateTime.now;
-          yield* storageService.addMessage(sessionId, {
-            role: "user",
-            content: prompt,
-            timestamp: DateTime.toEpochMillis(nowPrompt),
-          });
-        } else if (request.action) {
-          const nowAction = yield* DateTime.now;
-          yield* storageService.addMessage(sessionId, {
-            role: "user",
-            content: `[Action: ${request.action}] ${JSON.stringify(request.actionData || {})}`,
-            timestamp: DateTime.toEpochMillis(nowAction),
-          });
-        }
-
         // Get unified stream from GenerateService - AI decides patches vs full
+        // Note: streamUnified stores prompt/action in its finalizer
         const unifiedStream = yield* generateService.streamUnified({
+          sessionId,
           currentHtml: isResetAction ? undefined : (currentHtml ?? undefined),
           prompt,
           action: request.action,
@@ -322,14 +274,6 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
           Effect.gen(function* () {
             const finalHtml = yield* vdomService.getHtml(sessionId);
             lastHtml = finalHtml || lastHtml;
-
-            const nowDone = yield* DateTime.now;
-            yield* storageService.addMessage(sessionId, {
-              role: "assistant",
-              content: `[Generated UI: ${lastHtml.slice(0, 100)}...]`,
-              timestamp: DateTime.toEpochMillis(nowDone),
-            });
-
             return { type: "done" as const, html: lastHtml } as StreamEvent;
           })
         );

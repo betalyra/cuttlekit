@@ -358,6 +358,40 @@ const UnifiedResponseSchema = z.union([
 
 ---
 
+## Step 20: Separated History for Optimal Caching
+
+**Problem:** Message history breaks Groq's prompt caching. Storing prompts and actions together chronologically means the cache prefix breaks on every action, wasting cacheability of prompts.
+
+**Insight from usage patterns:**
+- Users create UI via prompts (2-3 prompts typically)
+- Then interact via actions (10-50+ actions)
+- Prompts change rarely after creation; actions change every request
+
+**Solution:** Store prompts and actions separately in `StorageService`:
+- `prompts:{sessionId}` - User descriptions of what to create/change
+- `actions:{sessionId}` - User interactions with the UI
+
+**Message structure optimized for caching:**
+```
+[system prompt]           ← Static, always cached
+[prompt 1]                ← Semi-static prefix (high cache hits)
+[prompt 2]
+[RECENT ACTIONS: ...]     ← Compact summary (changes frequently)
+[current request]         ← Dynamic
+```
+
+**Key changes:**
+- `StorageService` refactored with separate `addPrompt`, `addAction`, `getRecentPrompts`, `getRecentActions`
+- Prompts stored verbatim for future RAG potential
+- Actions summarized into single compact message
+- `streamUnified` finalizer stores prompt/action after generation completes
+
+**Trade-off:** Loses exact chronology, but prompts form stable prefix that gets cached across requests.
+
+**Result:** With typical usage (3 prompts, 20 actions), the prompt prefix stays cached for all 20 action requests instead of breaking on each.
+
+---
+
 ## Key Takeaways
 
 1. **Plain HTML over JSX** - AI can steer a responsive frontend by generating plain HTML
@@ -366,3 +400,4 @@ const UnifiedResponseSchema = z.union([
 4. **Current HTML is the state** - No need to maintain separate state or conversation history
 5. **Patches over full regeneration** - Small updates are fast and cheap
 6. **Graceful degradation** - Patch failures automatically fall back to full regeneration
+7. **Separate prompt/action history** - Maximizes cache hits by keeping prompts as stable prefix

@@ -111,12 +111,42 @@ const logEvent = (event: StreamEvent) =>
     );
   });
 
+// Sample todo list HTML for testing multiple patches
+const SAMPLE_TODO_HTML = `<div class="max-w-md mx-auto p-6">
+  <h1 id="title" class="text-2xl font-bold mb-4">Todo List</h1>
+  <div class="flex gap-2 mb-4">
+    <input id="new-todo-input" type="text" placeholder="Add a task..." class="flex-1 px-3 py-2 border rounded" value="Buy groceries">
+    <button id="add-btn" data-action="add-todo" class="px-4 py-2 bg-blue-500 text-white rounded">Add</button>
+  </div>
+  <div id="stats" class="text-sm text-gray-500 mb-2">3 items, 1 completed</div>
+  <ul id="todo-list" class="space-y-2">
+    <li id="todo-1" class="flex items-center gap-2 p-2 bg-white rounded shadow">
+      <input type="checkbox" id="todo-1-checkbox" checked data-action="toggle" data-action-data="{&quot;id&quot;:&quot;1&quot;}">
+      <span id="todo-1-text" class="line-through text-gray-400">Learn Effect</span>
+      <button id="delete-1" data-action="delete" data-action-data="{&quot;id&quot;:&quot;1&quot;}" class="ml-auto text-red-500">×</button>
+    </li>
+    <li id="todo-2" class="flex items-center gap-2 p-2 bg-white rounded shadow">
+      <input type="checkbox" id="todo-2-checkbox" data-action="toggle" data-action-data="{&quot;id&quot;:&quot;2&quot;}">
+      <span id="todo-2-text">Build streaming patches</span>
+      <button id="delete-2" data-action="delete" data-action-data="{&quot;id&quot;:&quot;2&quot;}" class="ml-auto text-red-500">×</button>
+    </li>
+    <li id="todo-3" class="flex items-center gap-2 p-2 bg-white rounded shadow">
+      <input type="checkbox" id="todo-3-checkbox" data-action="toggle" data-action-data="{&quot;id&quot;:&quot;3&quot;}">
+      <span id="todo-3-text">Test benchmark</span>
+      <button id="delete-3" data-action="delete" data-action-data="{&quot;id&quot;:&quot;3&quot;}" class="ml-auto text-red-500">×</button>
+    </li>
+  </ul>
+</div>`;
+
 const testStreamEndpoint = Effect.gen(function* () {
   const client = yield* HttpClient.HttpClient;
 
+  // Test patch generation - adding a new todo (triggers multiple patches)
   const request: GenerateRequest = {
     type: "generate",
-    prompt: "Create a simple counter with increment and decrement buttons",
+    action: "add-todo",
+    actionData: { text: "Buy groceries" },
+    currentHtml: SAMPLE_TODO_HTML,
   };
 
   yield* Console.log("🚀 Starting stream request...");
