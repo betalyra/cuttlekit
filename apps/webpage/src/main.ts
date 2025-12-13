@@ -11,13 +11,6 @@ type GenerateRequest = {
   currentHtml?: string
 }
 
-type Response = {
-  type: "full-page" | "partial-update" | "message"
-  html?: string
-  message?: string
-  sessionId: string
-}
-
 // Patch types matching backend
 type Patch =
   | { selector: string; text: string }
@@ -155,9 +148,9 @@ const app = {
   },
 
   // Stream request using SSE for real-time patch updates
-  async sendStreamRequest(request: GenerateRequest) {
+  async sendStreamRequest(request: GenerateRequest, isInitial = false) {
     try {
-      this.setLoading(true, false)
+      this.setLoading(true, isInitial)
       this.setError(null)
 
       const currentHtml = this.getElements().contentEl.innerHTML || undefined
@@ -217,55 +210,14 @@ const app = {
     } catch (err) {
       this.setError(err instanceof Error ? err.message : String(err))
     } finally {
-      this.setLoading(false, false)
+      this.setLoading(false, isInitial)
     }
   },
 
   async sendRequest(request: GenerateRequest, isInitial = false) {
-    // Use streaming for action requests (when we have existing content)
-    const hasAction = request.action && request.action !== "generate" && request.action !== "reset"
-    const hasCurrentContent = !!this.getElements().contentEl.innerHTML?.trim()
-
-    if (hasAction && hasCurrentContent && !isInitial) {
-      return this.sendStreamRequest(request)
-    }
-
-    // Fall back to regular request for initial load, prompts, and special actions
-    try {
-      this.setLoading(true, isInitial)
-      this.setError(null)
-
-      const currentHtml = this.getElements().contentEl.innerHTML || undefined
-
-      const requestWithSession = {
-        ...request,
-        sessionId: this.sessionId || undefined,
-        currentHtml: currentHtml && currentHtml.trim() ? currentHtml : undefined,
-      }
-
-      const response = await fetch("http://localhost:34512/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(requestWithSession),
-      })
-
-      if (!response.ok) {
-        throw new Error("Failed to generate content")
-      }
-
-      const data = (await response.json()) as Response
-      this.sessionId = data.sessionId
-
-      if (data.type === "full-page" && data.html) {
-        this.getElements().contentEl.innerHTML = data.html
-        loadFontsFromHTML(data.html)
-        loadIconsFromHTML(data.html)
-      }
-    } catch (err) {
-      this.setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      this.setLoading(false, isInitial)
-    }
+    // Always use unified streaming endpoint for all requests
+    // This ensures history/caching optimization is used consistently
+    return this.sendStreamRequest(request, isInitial)
   },
 
   collectFormData(): Record<string, unknown> {

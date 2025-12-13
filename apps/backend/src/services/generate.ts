@@ -1,4 +1,4 @@
-import { Array as A, Effect, Stream, pipe } from "effect";
+import { Effect, Stream, pipe } from "effect";
 import { generateText, ModelMessage, TextPart, streamText } from "ai";
 import { z } from "zod";
 import { LlmProvider } from "./llm.js";
@@ -124,7 +124,7 @@ Use icons sparingly to enhance UX, not decorate.
 FONTS:
 Use any Google Font or open-source font by name (loaded on-demand from Fontsource CDN):
 - Inter, Roboto, Open Sans (clean sans-serif)
-- Playfair Display, Merriweather (elegant serif)
+- Libre Baskerville, Merriweather (elegant serif)
 - JetBrains Mono, Fira Code (monospace)
 - Space Grotesk, Poppins (modern geometric)
 
@@ -177,44 +177,38 @@ Example for deleting a todo:
 
 Output ONLY the JSON array, no explanation, no markdown.`;
 
-// Streaming system prompt - outputs patches as minified JSON lines
-const STREAMING_PATCH_PROMPT = `You are a UI Patch Engine. Generate minimal patches to update the UI.
+// Streaming system prompt - compact but complete
+const STREAMING_PATCH_PROMPT = `You are a Generative UI Engine. Output ONE minified JSON line only.
 
-OUTPUT FORMAT:
-Output one minified JSON object per line. Each line must be a complete, valid JSON object:
-{"mode":"patches","patches":[{"selector":"#id","text":"new value"}]}
-{"mode":"patches","patches":[{"selector":"#list","append":"<li>item</li>"}]}
+FORMAT:
+{"mode":"patches","patches":[{"selector":"#id","text":"new"}]} - for updates
+{"mode":"full","html":"<div>...</div>"} - for new UI or major changes
 
-RULES:
-- Each line is a SEPARATE batch of patches that can be applied immediately
-- Keep each line minimal - group related patches together
-- NO spaces or formatting - minified JSON only
-- Each line must end with a newline character
+PATCH FORMAT (exact JSON, #id selectors only):
+{"selector":"#id","text":"plain text"} - textContent, NO HTML
+{"selector":"#id","html":"<p>HTML</p>"} - innerHTML with HTML
+{"selector":"#id","attr":{"class":"x"}} - change attributes
+{"selector":"#id","append":"<li>new</li>"} - add to end
+{"selector":"#id","prepend":"<li>new</li>"} - add to start
+{"selector":"#id","remove":true} - delete element
 
-PATCH TYPES:
-- {"selector":"#id","text":"new text"} - Set text content
-- {"selector":"#id","html":"<div>...</div>"} - Replace innerHTML
-- {"selector":"#id","attr":{"class":"x","disabled":null}} - Set/remove attributes
-- {"selector":"#list","append":"<li>...</li>"} - Append child
-- {"selector":"#list","prepend":"<li>...</li>"} - Prepend child
-- {"selector":"#id","remove":true} - Remove element
+HTML RULES:
+- Raw HTML only, no markdown/code blocks, no html/head/body/script/style tags
+- Start with <div>, style with Tailwind CSS
+- Light mode (#fafafa bg, #0a0a0a text), minimal brutalist, generous whitespace
 
-SELECTOR RULES:
-- Use simple ID selectors (#id) - complex selectors will fail
-- Check the CURRENT HTML for actual element IDs before patching
-- For checkboxes: use attr with "checked":"checked" to check, "checked":null to uncheck
+INTERACTIVITY - NO JavaScript/onclick (won't work):
+- Buttons: <button id="inc-btn" data-action="increment">+</button>
+- With data: <button id="del-1" data-action="delete" data-action-data="{&quot;id&quot;:&quot;1&quot;}">Delete</button>
+- Inputs: <input id="filter" data-action="filter"> (triggers on change)
+- Checkbox: <input type="checkbox" id="todo-1-cb" data-action="toggle" data-action-data="{&quot;id&quot;:&quot;1&quot;}">
+Always use &quot; for JSON in data-action-data attributes.
 
-HTML IN PATCHES:
-When including HTML in patches, use escaped quotes for attributes:
-{"selector":"#list","append":"<li id=\\"item-1\\">Text</li>"}
+IDs REQUIRED: All interactive/dynamic elements need unique id. Containers: id="todo-list". Items: id="todo-1". Buttons: id="add-btn".
 
-For data-action-data, use &quot; for inner quotes:
-{"selector":"#list","append":"<button data-action-data=\\"{&quot;id&quot;:&quot;1&quot;}\\">Click</button>"}
+ICONS: <iconify-icon icon="mdi:plus"></iconify-icon> Sets: mdi, lucide, tabler, ph
 
-ICONS:
-Use Iconify: <iconify-icon icon="mdi:plus"></iconify-icon>
-
-Output ONLY minified JSON lines, nothing else.`;
+FONTS: style="font-family: 'Inter'" Options: Inter, Roboto (sans), Libre Baskerville, Merriweather (serif), JetBrains Mono (mono), Space Grotesk, Poppins (geometric)`;
 
 export type UnifiedGenerateOptions = {
   sessionId: string;
@@ -418,68 +412,32 @@ Cyber-minimalist design (monochromatic, clean lines, lots of whitespace).`,
               .pipe(Effect.catchAll(() => Effect.succeed([] as const))),
           ]);
 
-          // Build history messages optimized for Groq prompt caching:
-          // 1. System prompt (static - always cached)
-          // 2. Prompt history (semi-static - high cache hits, rarely changes)
-          // 3. Action summary (dynamic but compact)
-          // 4. Current request (always fresh)
+          // Build history (context only, not to act on)
+          const historyParts: string[] = [];
+          if (recentPrompts.length > 0) {
+            historyParts.push(`[HISTORY] Prompts: ${recentPrompts.map((p) => p.content).join("; ")}`);
+          }
+          if (recentActions.length > 0) {
+            historyParts.push(`[HISTORY] Actions: ${recentActions.map((a) => a.action).join(", ")}`);
+          }
 
-          // Add prompts as separate user messages (stable prefix for caching)
-          const promptMessages = pipe(
-            recentPrompts,
-            A.map((p) => ({
-              role: "user" as const,
-              content: `USER REQUEST: ${p.content}`,
-            }))
-          );
-
-          // Add action summary as single compact message (changes frequently)
-          const actionMessage =
-            recentActions.length > 0
-              ? [
-                  {
-                    role: "user" as const,
-                    content: `RECENT ACTIONS: ${pipe(
-                      recentActions,
-                      A.map(
-                        (a) =>
-                          `${a.action}${
-                            a.data ? `(${JSON.stringify(a.data)})` : ""
-                          }`
-                      ),
-                      (actions) => actions.join(", ")
-                    )}`,
-                  },
-                ]
-              : [];
-
-          const historyMessages = [...promptMessages, ...actionMessage];
-
-          // Build current user message (dynamic - placed last)
-          const currentMessageParts: string[] = [];
+          // Build current request
+          const currentParts: string[] = [];
           if (currentHtml) {
-            currentMessageParts.push(`CURRENT HTML:\n${currentHtml}`);
+            currentParts.push(`HTML:\n${currentHtml}`);
           }
           if (action) {
-            currentMessageParts.push(
-              `ACTION TRIGGERED: ${action}\nACTION DATA: ${JSON.stringify(
-                actionData,
-                null,
-                0
-              )}`
-            );
-          }
-          if (prompt) {
-            currentMessageParts.push(`USER REQUEST: ${prompt}`);
+            currentParts.push(`[NOW] Action: ${action} Data: ${JSON.stringify(actionData, null, 0)}`);
+          } else if (prompt) {
+            currentParts.push(`[NOW] Prompt: ${prompt}`);
           }
 
           const messages = [
             { role: "system" as const, content: STREAMING_PATCH_PROMPT },
-            ...historyMessages,
-            {
-              role: "user" as const,
-              content: currentMessageParts.join("\n\n"),
-            },
+            ...(historyParts.length > 0
+              ? [{ role: "user" as const, content: historyParts.join("\n") }]
+              : []),
+            { role: "user" as const, content: currentParts.join("\n\n") },
           ];
 
           const result = streamText({
@@ -526,7 +484,9 @@ Cyber-minimalist design (monochromatic, clean lines, lots of whitespace).`,
             Stream.mapEffect((line) => parseJsonLine(line)),
             // Log parsed response
             Stream.tap((response) =>
-              Effect.logDebug("Parsed response", { response })
+              Effect.logDebug("Parsed response", {
+                response: JSON.stringify(response),
+              })
             ),
             Stream.ensuring(
               Effect.gen(function* () {
