@@ -184,6 +184,10 @@ FORMAT:
 {"mode":"patches","patches":[{"selector":"#id","text":"new"}]} - for updates
 {"mode":"full","html":"<div>...</div>"} - for new UI or major changes
 
+JSON ESCAPING: Use single quotes for HTML attributes to avoid escaping.
+CORRECT: {"html":"<div class='flex'>"}
+WRONG: {"html":"<div class=\\"flex\\">"}
+
 PATCH FORMAT (exact JSON, #id selectors only):
 {"selector":"#id","text":"plain text"} - textContent, NO HTML
 {"selector":"#id","html":"<p>HTML</p>"} - innerHTML with HTML
