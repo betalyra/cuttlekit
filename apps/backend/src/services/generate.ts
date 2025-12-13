@@ -1,9 +1,8 @@
 import { Effect, Stream, pipe } from "effect";
-import { generateText, ModelMessage, TextPart, streamText } from "ai";
+import { streamText } from "ai";
 import { z } from "zod";
 import { LlmProvider } from "./llm.js";
 import { StorageService } from "./storage.js";
-import type { Patch } from "./vdom.js";
 
 // Wrap async iterable to handle AI SDK cleanup errors gracefully
 async function* safeAsyncIterable<T>(
@@ -54,129 +53,6 @@ const UnifiedResponseSchema = z.union([
 
 export type UnifiedResponse = z.infer<typeof UnifiedResponseSchema>;
 
-export type GenerateOptions = {
-  prompt?: string;
-  action?: string;
-  actionData?: Record<string, unknown>;
-  currentHtml?: string;
-};
-
-export type GeneratePatchesOptions = {
-  currentHtml: string;
-  action: string;
-  actionData?: Record<string, unknown>;
-  previousErrors?: string[];
-};
-
-// Static system prompt for full HTML generation - cacheable prefix
-const FULL_HTML_SYSTEM_PROMPT = `You are a Generative UI Engine that creates interactive web interfaces.
-
-TECHNICAL REQUIREMENTS:
-- Return ONLY raw HTML - no markdown, no code blocks
-- Do NOT include <html>, <head>, <body>, <script>, or <style> tags
-- Start directly with a <div> element
-- Style with Tailwind CSS utility classes
-
-INTERACTIVITY:
-Use data-action attributes for interactive elements:
-
-Buttons (triggered on click):
-- <button data-action="increment">+</button>
-- <button id="delete-123" data-action="delete" data-action-data="{&quot;id&quot;:&quot;123&quot;}">Delete</button>
-
-Form inputs (triggered on change):
-- <input type="checkbox" id="todo-1-checkbox" data-action="toggle" data-action-data="{&quot;id&quot;:&quot;1&quot;}">
-- <select id="filter" data-action="filter"><option value="all">All</option></select>
-- <input type="radio" name="priority" data-action="set-priority" data-action-data="{&quot;level&quot;:&quot;high&quot;}">
-
-All input values are automatically collected and sent with actions.
-
-CRITICAL - UNIQUE IDs:
-ALWAYS add unique id attributes to ALL interactive and dynamic elements:
-- List containers: id="todo-list", id="cart-items" (required for append/prepend operations)
-- List items: id="todo-1", id="todo-2"
-- Checkboxes: id="todo-1-checkbox", id="todo-2-checkbox"
-- Buttons with data: id="delete-1", id="toggle-1"
-- Any element that might be updated: id="counter-value", id="status-text"
-This is REQUIRED for the patch system to work correctly. Never rely on complex attribute selectors.
-
-CRITICAL - JSON IN ATTRIBUTES:
-When using data-action-data, use HTML entities for quotes:
-- CORRECT: data-action-data="{&quot;id&quot;:&quot;4&quot;}"
-- WRONG: data-action-data='{"id":"4"}' or data-action-data="{\"id\":\"4\"}"
-Always use &quot; for quotes inside attribute values.
-
-ICONS:
-Use Iconify web component for icons (loaded on-demand):
-- <iconify-icon icon="mdi:home"></iconify-icon>
-- <iconify-icon icon="lucide:search" width="20"></iconify-icon>
-- <iconify-icon icon="tabler:plus" class="text-blue-500"></iconify-icon>
-
-Popular icon sets:
-- mdi: Material Design Icons (mdi:home, mdi:account, mdi:cog, mdi:delete, mdi:plus)
-- lucide: Lucide Icons (lucide:search, lucide:menu, lucide:x, lucide:check)
-- tabler: Tabler Icons (tabler:plus, tabler:trash, tabler:edit, tabler:settings)
-- ph: Phosphor Icons (ph:house, ph:user, ph:gear)
-
-Icons inherit text color via currentColor. Size with width/height attributes or Tailwind classes.
-Use icons sparingly to enhance UX, not decorate.
-
-FONTS:
-Use any Google Font or open-source font by name (loaded on-demand from Fontsource CDN):
-- Inter, Roboto, Open Sans (clean sans-serif)
-- Libre Baskerville, Merriweather (elegant serif)
-- JetBrains Mono, Fira Code (monospace)
-- Space Grotesk, Poppins (modern geometric)
-
-Example: style="font-family: 'Space Grotesk', sans-serif"
-
-Stick to Inter unless a specific aesthetic is requested.
-
-Design: Light mode (#fafafa background, #0a0a0a text), minimal brutalist UI, generous whitespace, no decorative elements.
-
-Output only HTML, nothing else.`;
-
-// Static system prompt for patch generation - cacheable prefix
-const PATCH_SYSTEM_PROMPT = `You are a UI Patch Engine. Generate minimal patches to update the UI.
-
-PATCH TYPES:
-- { "selector": "#id", "text": "new text" } - Set text content
-- { "selector": ".class", "html": "<div>...</div>" } - Replace innerHTML
-- { "selector": "#id", "attr": { "class": "new-class", "disabled": "true" } } - Set attributes
-- { "selector": "#id", "attr": { "checked": null } } - Remove attribute (use null to uncheck checkboxes)
-- { "selector": "#list", "append": "<li>new item</li>" } - Append child HTML
-- { "selector": "#list", "prepend": "<li>new item</li>" } - Prepend child HTML
-- { "selector": "#item", "remove": true } - Remove element
-
-RULES:
-1. Output ONLY a valid JSON array of patches
-2. ALWAYS check the CURRENT HTML for actual element IDs - don't assume IDs exist
-3. Use simple ID selectors like "#todo-1", "#counter-value", "#todo-list"
-4. NEVER use complex attribute selectors like [data-action-data='{"id":"1"}'] - they will FAIL
-5. If an element lacks an ID, use the closest parent with an ID + child selector (e.g., "#todo-list ul")
-6. Keep patches minimal - only change what's needed
-7. For counters/numbers: just update the text content
-8. For lists: use append/prepend to add items, remove to delete
-9. For checkboxes: use "#todo-1-checkbox" not input[data-action="toggle"]
-10. For boolean attributes (checked, disabled): use "checked" to set, null to remove
-
-Example for checking a checkbox:
-[{"selector": "#todo-1-checkbox", "attr": {"checked": "checked"}}]
-
-Example for unchecking a checkbox (use null to remove the attribute):
-[{"selector": "#todo-1-checkbox", "attr": {"checked": null}}]
-
-Example for incrementing a counter with current value "5":
-[{"selector": "#counter-value", "text": "6"}]
-
-Example for adding a todo (note: use &quot; for JSON in attributes):
-[{"selector": "#todo-list", "append": "<li id=\\"todo-4\\"><input type=\\"checkbox\\" id=\\"todo-4-checkbox\\" data-action=\\"toggle\\" data-action-data=\\"{&quot;id&quot;:&quot;4&quot;}\\"> New task</li>"}]
-
-Example for deleting a todo:
-[{"selector": "#todo-1", "remove": true}]
-
-Output ONLY the JSON array, no explanation, no markdown.`;
-
 // Streaming system prompt - compact but complete
 const STREAMING_PATCH_PROMPT = `You are a Generative UI Engine. Output ONE minified JSON line only.
 
@@ -206,13 +82,15 @@ INTERACTIVITY - NO JavaScript/onclick (won't work):
 - With data: <button id="del-1" data-action="delete" data-action-data="{&quot;id&quot;:&quot;1&quot;}">Delete</button>
 - Inputs: <input id="filter" data-action="filter"> (triggers on change)
 - Checkbox: <input type="checkbox" id="todo-1-cb" data-action="toggle" data-action-data="{&quot;id&quot;:&quot;1&quot;}">
-Always use &quot; for JSON in data-action-data attributes.
+- Select: <select id="sort" data-action="sort"><option value="asc">Asc</option></select>
+- Radio: <input type="radio" name="prio" id="prio-high" data-action="set-prio" data-action-data="{&quot;level&quot;:&quot;high&quot;}">
+Use &quot; for JSON in data-action-data. Input values auto-sent with actions.
 
 IDs REQUIRED: All interactive/dynamic elements need unique id. Containers: id="todo-list". Items: id="todo-1". Buttons: id="add-btn".
 
-ICONS: <iconify-icon icon="mdi:plus"></iconify-icon> Sets: mdi, lucide, tabler, ph
+ICONS: <iconify-icon icon="mdi:plus"></iconify-icon> Any Iconify set (mdi, lucide, tabler, ph, etc). Use sparingly.
 
-FONTS: style="font-family: 'Inter'" Options: Inter, Roboto (sans), Libre Baskerville, Merriweather (serif), JetBrains Mono (mono), Space Grotesk, Poppins (geometric)`;
+FONTS: Any Fontsource font via style="font-family: 'FontName'". Default Inter. Common: Roboto, Libre Baskerville, JetBrains Mono, Space Grotesk, Poppins.`;
 
 export type UnifiedGenerateOptions = {
   sessionId: string;
@@ -229,168 +107,6 @@ export class GenerateService extends Effect.Service<GenerateService>()(
     effect: Effect.gen(function* () {
       const llm = yield* LlmProvider;
       const storage = yield* StorageService;
-
-      const generateFullHtml = (options: GenerateOptions) =>
-        Effect.gen(function* () {
-          yield* Effect.log("Generating full HTML", options);
-
-          const { prompt, action, actionData, currentHtml } = options;
-
-          // Build user message with dynamic content
-          const userMessageParts: TextPart[] = [];
-
-          if (currentHtml) {
-            userMessageParts.push({
-              type: "text",
-              text: `CURRENT UI STATE:\n${currentHtml}\n\nIMPORTANT: Preserve the existing design, layout, colors, and style. Only make changes that are explicitly requested.`,
-            });
-          }
-
-          if (action) {
-            userMessageParts.push({
-              type: "text",
-              text: `ACTION TRIGGERED: ${action}\nAction Data: ${JSON.stringify(
-                actionData,
-                null,
-                0
-              )}\n\nThe user clicked a button with data-action="${action}". Generate the COMPLETE page with the updated state.`,
-            });
-          } else if (prompt) {
-            userMessageParts.push({
-              type: "text",
-              text: `USER REQUEST: ${prompt}\n\nGenerate an interface based on this request.`,
-            });
-          } else {
-            userMessageParts.push({
-              type: "text",
-              text: `Generate a simple centered welcome message for a generative UI system.
-Keep it minimal: just a heading and a short description explaining that users can describe what they want to create.
-Cyber-minimalist design (monochromatic, clean lines, lots of whitespace).`,
-            });
-          }
-
-          const messages: ModelMessage[] = [
-            { role: "system" as const, content: FULL_HTML_SYSTEM_PROMPT },
-            { role: "user" as const, content: userMessageParts },
-          ];
-
-          const result = yield* Effect.tryPromise({
-            try: () =>
-              generateText({
-                model: llm.provider.languageModel("openai/gpt-oss-20b"),
-                messages,
-              }),
-            catch: (error) => {
-              const errorMessage =
-                error instanceof Error ? error.message : String(error);
-              console.error("Generation error:", error);
-              return new Error(`Failed to generate text: ${errorMessage}`);
-            },
-          });
-
-          // Log token usage with cache stats
-          const usage = result.usage;
-          const inputTokens = usage.inputTokens ?? 0;
-          const cachedTokens = usage.cachedInputTokens ?? 0;
-          const cacheHitRate =
-            inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0;
-
-          yield* Effect.log("Full HTML generation completed - Token usage", {
-            inputTokens,
-            outputTokens: usage.outputTokens ?? 0,
-            totalTokens: usage.totalTokens ?? 0,
-            cachedTokens,
-            cacheHitRate: `${cacheHitRate.toFixed(1)}%`,
-          });
-
-          return result.text;
-        });
-
-      const generatePatches = (options: GeneratePatchesOptions) =>
-        Effect.gen(function* () {
-          yield* Effect.log("Generating patches", {
-            action: options.action,
-            hasErrors: options.previousErrors?.length ?? 0,
-          });
-
-          const {
-            currentHtml,
-            action,
-            actionData,
-            previousErrors = [],
-          } = options;
-
-          // Build user message with dynamic content
-          const userMessageParts = [
-            `CURRENT HTML:\n${currentHtml}`,
-            `ACTION TRIGGERED: ${action}\nACTION DATA: ${JSON.stringify(
-              actionData,
-              null,
-              0
-            )}`,
-          ];
-
-          if (previousErrors.length > 0) {
-            userMessageParts.push(
-              `YOUR PREVIOUS PATCHES FAILED:\n${previousErrors.join(
-                "\n"
-              )}\n\nPlease generate corrected patches. Make sure selectors match existing elements.`
-            );
-          }
-
-          const messages = [
-            { role: "system" as const, content: PATCH_SYSTEM_PROMPT },
-            { role: "user" as const, content: userMessageParts.join("\n\n") },
-          ];
-
-          const result = yield* Effect.tryPromise({
-            try: () =>
-              generateText({
-                model: llm.provider.languageModel("openai/gpt-oss-20b"),
-                messages,
-              }),
-            catch: (error) => {
-              const errorMessage =
-                error instanceof Error ? error.message : String(error);
-              console.error("Patch generation error:", error);
-              return new Error(`Failed to generate patches: ${errorMessage}`);
-            },
-          });
-
-          // Log token usage with cache stats
-          const usage = result.usage;
-          const inputTokens = usage.inputTokens ?? 0;
-          const cachedTokens = usage.cachedInputTokens ?? 0;
-          const cacheHitRate =
-            inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0;
-
-          yield* Effect.log("Patch generation - Token usage", {
-            inputTokens,
-            outputTokens: usage.outputTokens ?? 0,
-            totalTokens: usage.totalTokens ?? 0,
-            cachedTokens,
-            cacheHitRate: `${cacheHitRate.toFixed(1)}%`,
-          });
-
-          // Parse the JSON response
-          const text = result.text.trim();
-          const jsonText = text.startsWith("```")
-            ? text.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "")
-            : text;
-
-          const patches = yield* Effect.try({
-            try: () => JSON.parse(jsonText) as Patch[],
-            catch: (e) =>
-              new Error(
-                `Failed to parse patches JSON: ${e}\nResponse was: ${text}`
-              ),
-          });
-
-          yield* Effect.log("Patch generation completed", {
-            patchCount: patches.length,
-          });
-          return patches;
-        });
 
       const streamUnified = (
         options: UnifiedGenerateOptions
@@ -527,11 +243,7 @@ Cyber-minimalist design (monochromatic, clean lines, lots of whitespace).`,
           return effectStream;
         });
 
-      return {
-        generateFullHtml,
-        generatePatches,
-        streamUnified,
-      };
+      return { streamUnified };
     }),
   }
 ) {}

@@ -8,7 +8,7 @@ import {
 } from "@effect/platform";
 import { Effect, Layer, Schema, Stream } from "effect";
 import { RequestHandlerService, type StreamEvent } from "./services/request-handler.js";
-import { Request, Response } from "./types/messages.js";
+import { Request } from "./types/messages.js";
 
 // API definition
 export const api = HttpApi.make("api")
@@ -23,19 +23,12 @@ export const api = HttpApi.make("api")
     )
   )
   .add(
-    HttpApiGroup.make("generate")
-      .add(
-        HttpApiEndpoint.post("generate", "/generate")
-          .setPayload(Request)
-          .addSuccess(Response)
-          .addError(HttpApiError.InternalServerError)
-      )
-      .add(
-        HttpApiEndpoint.post("generate-stream", "/generate/stream")
-          .setPayload(Request)
-          .addSuccess(Schema.Unknown)
-          .addError(HttpApiError.InternalServerError)
-      )
+    HttpApiGroup.make("generate").add(
+      HttpApiEndpoint.post("generate-stream", "/generate/stream")
+        .setPayload(Request)
+        .addSuccess(Schema.Unknown)
+        .addError(HttpApiError.InternalServerError)
+    )
   );
 
 // Health group handlers
@@ -84,35 +77,25 @@ export const makeGenerateGroupLive = <E, R>(
   servicesLayer: Layer.Layer<RequestHandlerService, E, R>
 ) =>
   HttpApiBuilder.group(api, "generate", (handlers) =>
-    handlers
-      .handle("generate", ({ payload }) =>
-        Effect.gen(function* () {
-          const requestHandler = yield* RequestHandlerService;
+    handlers.handle("generate-stream", ({ payload }) =>
+      Effect.gen(function* () {
+        const requestHandler = yield* RequestHandlerService;
 
-          return yield* requestHandler
-            .handleRequest(payload)
-            .pipe(Effect.mapError(() => new HttpApiError.InternalServerError()));
-        })
-      )
-      .handle("generate-stream", ({ payload }) =>
-        Effect.gen(function* () {
-          const requestHandler = yield* RequestHandlerService;
+        const eventStream = yield* requestHandler
+          .handleStreamRequest(payload)
+          .pipe(Effect.mapError(() => new HttpApiError.InternalServerError()));
 
-          const eventStream = yield* requestHandler
-            .handleStreamRequest(payload)
-            .pipe(Effect.mapError(() => new HttpApiError.InternalServerError()));
+        const bodyStream = streamToSse(eventStream);
 
-          const bodyStream = streamToSse(eventStream);
-
-          return HttpServerResponse.stream(bodyStream, {
-            contentType: "text/event-stream",
-            headers: {
-              "Content-Type": "text/event-stream",
-              "Cache-Control": "no-cache",
-              "X-Accel-Buffering": "no",
-              Connection: "keep-alive",
-            },
-          });
-        }).pipe(Effect.mapError(() => new HttpApiError.InternalServerError()))
-      )
+        return HttpServerResponse.stream(bodyStream, {
+          contentType: "text/event-stream",
+          headers: {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            Connection: "keep-alive",
+          },
+        });
+      }).pipe(Effect.mapError(() => new HttpApiError.InternalServerError()))
+    )
   ).pipe(Layer.provide(servicesLayer));
