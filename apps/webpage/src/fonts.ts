@@ -87,6 +87,10 @@ async function loadFont(fontFamily: string): Promise<void> {
   )
 }
 
+// Decode common HTML entities in font strings
+const decodeHtmlEntities = (str: string) =>
+  str.replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&')
+
 // Extract fonts from HTML string (fast - no DOM traversal)
 function extractFontsFromHTML(html: string): Set<string> {
   const fonts = new Set<string>()
@@ -96,8 +100,8 @@ function extractFontsFromHTML(html: string): Set<string> {
   const stylePattern = /font-family:\s*([^;}"]+)/gi
   let match
   while ((match = stylePattern.exec(html)) !== null) {
-    // Parse the font list, handling quoted and unquoted names
-    const fontList = match[1]
+    // Decode HTML entities (e.g., &quot; -> ") before parsing
+    const fontList = decodeHtmlEntities(match[1])
     // Split by comma, but respect quotes
     const fontNames = fontList.match(/(?:'[^']+'+|"[^"]+"|[^,]+)/g) || []
     fontNames.forEach((f) => {

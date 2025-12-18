@@ -1,8 +1,22 @@
 import { Effect, Stream, pipe } from "effect";
-import { streamText } from "ai";
+import {
+  streamText,
+  wrapLanguageModel,
+  type LanguageModelMiddleware,
+} from "ai";
 import { z } from "zod";
 import { LlmProvider } from "./llm.js";
 import { StorageService } from "./storage.js";
+
+// Logging middleware to inspect prompts sent to LLM
+const loggingMiddleware: LanguageModelMiddleware = {
+  specificationVersion: "v3",
+  wrapStream: async ({ doStream, params }) => {
+    console.log("=== LLM Request ===");
+    console.log("Prompt:", JSON.stringify(params, null, 2));
+    return doStream();
+  },
+};
 
 // Wrap async iterable to handle AI SDK cleanup errors gracefully
 async function* safeAsyncIterable<T>(
@@ -135,10 +149,18 @@ export class GenerateService extends Effect.Service<GenerateService>()(
           // Build history (context only, not to act on)
           const historyParts: string[] = [];
           if (recentPrompts.length > 0) {
-            historyParts.push(`[HISTORY] Prompts: ${recentPrompts.map((p) => p.content).join("; ")}`);
+            historyParts.push(
+              `[HISTORY] Prompts: ${recentPrompts
+                .map((p) => p.content)
+                .join("; ")}`
+            );
           }
           if (recentActions.length > 0) {
-            historyParts.push(`[HISTORY] Actions: ${recentActions.map((a) => a.action).join(", ")}`);
+            historyParts.push(
+              `[HISTORY] Actions: ${recentActions
+                .map((a) => a.action)
+                .join(", ")}`
+            );
           }
 
           // Build current request
@@ -147,7 +169,13 @@ export class GenerateService extends Effect.Service<GenerateService>()(
             currentParts.push(`HTML:\n${currentHtml}`);
           }
           if (action) {
-            currentParts.push(`[NOW] Action: ${action} Data: ${JSON.stringify(actionData, null, 0)}`);
+            currentParts.push(
+              `[NOW] Action: ${action} Data: ${JSON.stringify(
+                actionData,
+                null,
+                0
+              )}`
+            );
           } else if (prompt) {
             currentParts.push(`[NOW] Prompt: ${prompt}`);
           }
@@ -160,8 +188,13 @@ export class GenerateService extends Effect.Service<GenerateService>()(
             { role: "user" as const, content: currentParts.join("\n\n") },
           ];
 
+          const wrappedModel = wrapLanguageModel({
+            model: llm.provider.languageModel("openai/gpt-oss-120b"),
+            middleware: loggingMiddleware,
+          });
+
           const result = streamText({
-            model: llm.provider.languageModel("openai/gpt-oss-20b"),
+            model: wrappedModel,
             messages,
           });
 
