@@ -1,12 +1,12 @@
-import {
-  createGoogleGenerativeAI,
-  GoogleGenerativeAIProvider,
-} from "@ai-sdk/google";
-import { createGroq, GroqProvider } from "@ai-sdk/groq";
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import { createGroq } from "@ai-sdk/groq";
 import { Config, Context, Effect, Layer, Redacted } from "effect";
 
+type GoogleProvider = ReturnType<typeof createGoogleGenerativeAI>;
+type GroqProvider = ReturnType<typeof createGroq>;
+
 export type ILlmProvider = {
-  provider: GoogleGenerativeAIProvider | GroqProvider;
+  provider: GoogleProvider | GroqProvider;
 };
 
 export class LlmProvider extends Context.Tag("LlmProvider")<

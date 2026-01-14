@@ -5,7 +5,7 @@ import {
   type LanguageModelMiddleware,
 } from "ai";
 import { z } from "zod";
-import { LlmProvider } from "./llm.js";
+import { LlmProvider } from "@betalyra/generative-ui-common/server";
 import { StorageService } from "./storage.js";
 
 // Logging middleware to inspect prompts sent to LLM

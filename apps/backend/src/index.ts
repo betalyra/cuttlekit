@@ -10,7 +10,7 @@ import { createServer } from "node:http";
 
 import { api, healthGroupLive, makeGenerateGroupLive } from "./api.js";
 import { GenerateService } from "./services/generate.js";
-import { GoogleService, GroqService } from "./services/llm.js";
+import { GoogleService, GroqService } from "@betalyra/generative-ui-common/server";
 import { SessionService } from "./services/session.js";
 import { StorageService } from "./services/storage.js";
 import { VdomService } from "./services/vdom.js";
