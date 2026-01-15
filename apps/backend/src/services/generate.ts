@@ -7,6 +7,7 @@ import {
 import { z } from "zod";
 import { LlmProvider } from "@betalyra/generative-ui-common/server";
 import { StorageService } from "./storage.js";
+import { accumulateLinesWithFlush } from "../stream/utils.js";
 
 // Logging middleware to inspect prompts sent to LLM
 const loggingMiddleware: LanguageModelMiddleware = {
@@ -73,11 +74,16 @@ const UnifiedResponseSchema = z.union([
 export type UnifiedResponse = z.infer<typeof UnifiedResponseSchema>;
 
 // Streaming system prompt - compact but complete
-const STREAMING_PATCH_PROMPT = `You are a Generative UI Engine. Output ONE minified JSON line only.
+const STREAMING_PATCH_PROMPT = `You are a Generative UI Engine.
 
-FORMAT:
-{"type":"patches","patches":[{"selector":"#id","text":"new"}]} - for updates
-{"type":"full","html":"<div>...</div>"} - for new UI or major changes
+OUTPUT FORMAT (JSONL - one JSON object per line, MUST include "type" field):
+{"type":"patches","patches":[{"selector":"#id","text":"new"}]} - PREFERRED for updates
+{"type":"full","html":"<div>...</div>"} - only for new UI or major structural changes
+
+WHEN TO USE EACH:
+- patches: ALWAYS prefer patches. Use for any update to existing UI. Keep patches small and focused.
+- full: Only when no existing HTML, or when 50%+ of UI needs restructuring.
+- Multiple small patches > one large patch. Each patch should do ONE thing.
 
 JSON ESCAPING: Use single quotes for HTML attributes to avoid escaping.
 CORRECT: {"html":"<div class='flex'>"}
@@ -206,12 +212,9 @@ export class GenerateService extends Effect.Service<GenerateService>()(
           const result = streamText({
             model: wrappedModel,
             messages,
-            onFinish({ usage }) {
-              console.log("Token usage:", usage);
-              // Output: { promptTokens: 10, completionTokens: 20, totalTokens: 30 }
-            },
+
             providerOptions: {
-              groq: {
+              openai: {
                 streamOptions: { includeUsage: true },
               },
             },
@@ -219,8 +222,33 @@ export class GenerateService extends Effect.Service<GenerateService>()(
 
           const parseJsonLine = (line: string) =>
             Effect.try({
-              try: () => JSON.parse(line) as UnifiedResponse,
-              catch: () => new Error(`Failed to parse JSON line: ${line}`),
+              try: () => {
+                const parsed = JSON.parse(line);
+
+                // Try parsing as UnifiedResponse first
+                const unifiedResult = UnifiedResponseSchema.safeParse(parsed);
+                if (unifiedResult.success) {
+                  return unifiedResult.data;
+                }
+
+                // Fallback: check if it's a raw patch and wrap it
+                const patchResult = PatchSchema.safeParse(parsed);
+                if (patchResult.success) {
+                  return {
+                    type: "patches" as const,
+                    patches: [patchResult.data],
+                  };
+                }
+
+                // Neither valid - throw with details
+                throw new Error(
+                  `Invalid response format: ${unifiedResult.error.message}`
+                );
+              },
+              catch: (error) =>
+                error instanceof Error
+                  ? error
+                  : new Error(`Failed to parse JSON line: ${line}`),
             });
 
           // Token stream from LLM
@@ -232,26 +260,10 @@ export class GenerateService extends Effect.Service<GenerateService>()(
                 : new Error(`Stream error: ${String(error)}`)
           );
 
-          // Append trailing newline to flush any remaining buffer content
-          const tokenStreamWithFlush = pipe(
-            tokenStream,
-            Stream.concat(Stream.make("\n"))
-          );
-
           const contentStream = pipe(
-            tokenStreamWithFlush,
-            // Buffer tokens until newline, emit completed lines immediately
-            Stream.mapAccum("", (buffer, token) => {
-              const combined = buffer + token;
-              const parts = combined.split("\n");
-              const completedLines = parts.slice(0, -1);
-              const newBuffer = parts[parts.length - 1];
-              return [newBuffer, completedLines] as const;
-            }),
-            // Flatten array of lines into individual line emissions
-            Stream.mapConcat((lines) => lines),
-            // Filter out empty lines
-            Stream.filter((line) => line.trim().length > 0),
+            tokenStream,
+            accumulateLinesWithFlush,
+            Stream.tap((line) => Effect.log("Line", { line })),
             // Parse each line as JSON
             Stream.mapEffect((line) => parseJsonLine(line)),
             // Log parsed response

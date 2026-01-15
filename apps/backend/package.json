@@ -5,7 +5,8 @@
     "type": "module",
     "scripts": {
         "dev": "tsx watch src/index.ts",
-        "build": "tsdown"
+        "build": "tsdown",
+        "test": "vitest"
     },
     "dependencies": {
         "@betalyra/generative-ui-common": "workspace:*"

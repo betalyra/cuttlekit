@@ -19,12 +19,14 @@
     "bench": "tsx scripts/bench.ts"
   },
   "devDependencies": {
+    "@effect/vitest": "^0.27.0",
     "@types/alpinejs": "^3.13.11",
     "@types/node": "^25.0.8",
     "tinybench": "^6.0.0",
     "tsx": "^4.21.0",
     "typescript": "~5.9.3",
-    "vite": "7.3.1"
+    "vite": "7.3.1",
+    "vitest": "^4.0.17"
   },
   "pnpm": {
     "overrides": {
@@ -40,7 +42,7 @@
     "ai": "6.0.34",
     "effect": "^3.19.14",
     "happy-dom": "^20.1.0",
-    "zod": "^4.3.5",
-    "tsdown": "^0.19.0"
+    "tsdown": "^0.19.0",
+    "zod": "^4.3.5"
   }
 }
