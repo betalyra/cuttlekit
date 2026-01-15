@@ -1,4 +1,4 @@
-import { Effect, Stream, pipe } from "effect";
+import { Effect, Stream, pipe, DateTime, Duration } from "effect";
 import {
   streamText,
   wrapLanguageModel,
@@ -53,15 +53,20 @@ const PatchSchema = z.union([
 
 const PatchArraySchema = z.array(PatchSchema);
 
-// Unified response schema - AI decides the mode
+// Unified response schema - AI decides the type
 const UnifiedResponseSchema = z.union([
   z.object({
-    mode: z.literal("patches"),
+    type: z.literal("patches"),
     patches: PatchArraySchema,
   }),
   z.object({
-    mode: z.literal("full"),
+    type: z.literal("full"),
     html: z.string(),
+  }),
+  z.object({
+    type: z.literal("stats"),
+    cacheRate: z.number(), // percentage 0-100
+    tokensPerSecond: z.number(),
   }),
 ]);
 
@@ -71,8 +76,8 @@ export type UnifiedResponse = z.infer<typeof UnifiedResponseSchema>;
 const STREAMING_PATCH_PROMPT = `You are a Generative UI Engine. Output ONE minified JSON line only.
 
 FORMAT:
-{"mode":"patches","patches":[{"selector":"#id","text":"new"}]} - for updates
-{"mode":"full","html":"<div>...</div>"} - for new UI or major changes
+{"type":"patches","patches":[{"selector":"#id","text":"new"}]} - for updates
+{"type":"full","html":"<div>...</div>"} - for new UI or major changes
 
 JSON ESCAPING: Use single quotes for HTML attributes to avoid escaping.
 CORRECT: {"html":"<div class='flex'>"}
@@ -188,14 +193,28 @@ export class GenerateService extends Effect.Service<GenerateService>()(
             { role: "user" as const, content: currentParts.join("\n\n") },
           ];
 
-          const wrappedModel = wrapLanguageModel({
-            model: llm.provider.languageModel("openai/gpt-oss-120b"),
-            middleware: loggingMiddleware,
-          });
+          // const wrappedModel = wrapLanguageModel({
+          //   model: llm.provider.languageModel("openai/gpt-oss-120b"),
+          //   middleware: loggingMiddleware,
+          // });
+          const wrappedModel = llm.provider.languageModel(
+            "openai/gpt-oss-120b"
+          );
+
+          const startTime = yield* DateTime.now;
 
           const result = streamText({
             model: wrappedModel,
             messages,
+            onFinish({ usage }) {
+              console.log("Token usage:", usage);
+              // Output: { promptTokens: 10, completionTokens: 20, totalTokens: 30 }
+            },
+            providerOptions: {
+              groq: {
+                streamOptions: { includeUsage: true },
+              },
+            },
           });
 
           const parseJsonLine = (line: string) =>
@@ -219,7 +238,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
             Stream.concat(Stream.make("\n"))
           );
 
-          const effectStream = pipe(
+          const contentStream = pipe(
             tokenStreamWithFlush,
             // Buffer tokens until newline, emit completed lines immediately
             Stream.mapAccum("", (buffer, token) => {
@@ -240,40 +259,59 @@ export class GenerateService extends Effect.Service<GenerateService>()(
               Effect.logDebug("Parsed response", {
                 response: JSON.stringify(response),
               })
-            ),
-            Stream.ensuring(
-              Effect.gen(function* () {
-                const usage = yield* Effect.promise(() => result.usage);
-
-                const inputTokens = usage.inputTokens ?? 0;
-                const cachedTokens = usage.cachedInputTokens ?? 0;
-                const cacheHitRate =
-                  inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0;
-
-                // Store prompt and action separately for optimal caching
-                if (prompt) {
-                  yield* storage
-                    .addPrompt(sessionId, prompt)
-                    .pipe(Effect.catchAll(() => Effect.void));
-                }
-                if (action) {
-                  yield* storage
-                    .addAction(sessionId, action, actionData)
-                    .pipe(Effect.catchAll(() => Effect.void));
-                }
-
-                yield* Effect.log("Stream completed - Token usage", {
-                  inputTokens,
-                  outputTokens: usage.outputTokens ?? 0,
-                  totalTokens: usage.totalTokens ?? 0,
-                  cachedTokens,
-                  cacheHitRate: `${cacheHitRate.toFixed(1)}%`,
-                });
-              })
             )
           );
 
-          return effectStream;
+          // Stats event emitted after content stream completes
+          const statsStream = Stream.fromEffect(
+            Effect.gen(function* () {
+              const endTime = yield* DateTime.now;
+              const elapsed = DateTime.distanceDuration(startTime, endTime);
+              const elapsedMs = Duration.toMillis(elapsed);
+              const elapsedSeconds = elapsedMs / 1000;
+
+              const usage = yield* Effect.promise(() => result.usage);
+              yield* Effect.log("Usage", { usage: JSON.stringify(usage) });
+
+              const inputTokens = usage.inputTokens ?? 0;
+              const outputTokens = usage.outputTokens ?? 0;
+              const cachedTokens =
+                usage.inputTokenDetails?.cacheReadTokens ?? 0;
+              const cacheRate =
+                inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0;
+              const tokensPerSecond =
+                elapsedSeconds > 0 ? outputTokens / elapsedSeconds : 0;
+
+              // Store prompt and action separately for optimal caching
+              if (prompt) {
+                yield* storage
+                  .addPrompt(sessionId, prompt)
+                  .pipe(Effect.catchAll(() => Effect.void));
+              }
+              if (action) {
+                yield* storage
+                  .addAction(sessionId, action, actionData)
+                  .pipe(Effect.catchAll(() => Effect.void));
+              }
+
+              yield* Effect.log("Stream completed - Token usage", {
+                inputTokens,
+                outputTokens,
+                totalTokens: usage.totalTokens ?? 0,
+                cachedTokens,
+                cacheRate: `${cacheRate.toFixed(1)}%`,
+                tokensPerSecond: `${tokensPerSecond.toFixed(1)} tok/s`,
+              });
+
+              return {
+                type: "stats" as const,
+                cacheRate: Math.round(cacheRate),
+                tokensPerSecond: Math.round(tokensPerSecond),
+              };
+            })
+          );
+
+          return pipe(contentStream, Stream.concat(statsStream));
         });
 
       return { streamUnified };

@@ -1,4 +1,4 @@
-import { Effect, Stream } from "effect";
+import { Effect, Stream, Match, pipe } from "effect";
 import { GenerateService, type UnifiedResponse } from "./generate.js";
 import { SessionService } from "./session.js";
 import { VdomService, type Patch } from "./vdom.js";
@@ -41,6 +41,7 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
       | { type: "session"; sessionId: string }
       | { type: "patch"; patch: Patch }
       | { type: "html"; html: string }
+      | { type: "stats"; cacheRate: number; tokensPerSecond: number }
       | { type: "done"; html: string };
 
     const generateStream = (request: UIRequest) =>
@@ -66,22 +67,29 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
         // Note: streamUnified stores prompt/action in its finalizer
         const unifiedStream = yield* generateService.streamUnified({
           sessionId,
-          currentHtml: isResetAction ? undefined : (currentHtml ?? undefined),
+          currentHtml: isResetAction ? undefined : currentHtml ?? undefined,
           prompt,
           action: request.action,
           actionData: request.actionData,
         });
 
         // Start with session event
-        const sessionEvent = Stream.make({ type: "session" as const, sessionId } as StreamEvent);
+        const sessionEvent = Stream.make({
+          type: "session" as const,
+          sessionId,
+        } as StreamEvent);
 
         // Transform unified responses to stream events, applying to VDOM
         let lastHtml = currentHtml || "";
 
-        const handlePatchResponse = (patches: Patch[]): Effect.Effect<StreamEvent[], never, never> =>
+        const handlePatchResponse = (
+          patches: Patch[]
+        ): Effect.Effect<StreamEvent[], never, never> =>
           Effect.forEach(patches, (patch) =>
             Effect.gen(function* () {
-              const result = yield* vdomService.applyPatches(sessionId, [patch]);
+              const result = yield* vdomService.applyPatches(sessionId, [
+                patch,
+              ]);
               if (result.errors.length > 0) {
                 yield* Effect.log("Patch error", { error: result.errors[0] });
               }
@@ -90,19 +98,36 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
             })
           );
 
-        const handleFullResponse = (html: string): Effect.Effect<StreamEvent[], never, never> =>
+        const handleFullResponse = (
+          html: string
+        ): Effect.Effect<StreamEvent[], never, never> =>
           Effect.gen(function* () {
             yield* vdomService.setHtml(sessionId, html);
             lastHtml = html;
             return [{ type: "html" as const, html } as StreamEvent];
           });
 
+        const handleResponse = (response: UnifiedResponse) =>
+          pipe(
+            Match.value(response),
+            Match.when({ type: "patches" }, (r) =>
+              handlePatchResponse(r.patches)
+            ),
+            Match.when({ type: "full" }, (r) => handleFullResponse(r.html)),
+            Match.when({ type: "stats" }, (r) =>
+              Effect.succeed([
+                {
+                  type: "stats" as const,
+                  cacheRate: r.cacheRate,
+                  tokensPerSecond: r.tokensPerSecond,
+                } as StreamEvent,
+              ])
+            ),
+            Match.exhaustive
+          );
+
         const contentEvents = unifiedStream.pipe(
-          Stream.mapEffect((response: UnifiedResponse) =>
-            response.mode === "patches"
-              ? handlePatchResponse(response.patches)
-              : handleFullResponse(response.html)
-          ),
+          Stream.mapEffect(handleResponse),
           Stream.flatMap((events) => Stream.fromIterable(events))
         );
 
@@ -115,7 +140,10 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
           })
         );
 
-        return Stream.concat(sessionEvent, Stream.concat(contentEvents, doneEvent));
+        return Stream.concat(
+          sessionEvent,
+          Stream.concat(contentEvents, doneEvent)
+        );
       });
 
     return { generateStream, resolveSession };
