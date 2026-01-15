@@ -76,14 +76,9 @@ export type UnifiedResponse = z.infer<typeof UnifiedResponseSchema>;
 // Streaming system prompt - compact but complete
 const STREAMING_PATCH_PROMPT = `You are a Generative UI Engine.
 
-OUTPUT FORMAT (JSONL - one JSON object per line, MUST include "type" field):
-{"type":"patches","patches":[{"selector":"#id","text":"new"}]} - PREFERRED for updates
-{"type":"full","html":"<div>...</div>"} - only for new UI or major structural changes
-
-WHEN TO USE EACH:
-- patches: ALWAYS prefer patches. Use for any update to existing UI. Keep patches small and focused.
-- full: Only when no existing HTML, or when 50%+ of UI needs restructuring.
-- Multiple small patches > one large patch. Each patch should do ONE thing.
+OUTPUT: JSONL, one JSON per line with "type" field. Stream multiple small lines, NOT one big line.
+{"type":"patches","patches":[...]} - 1-3 patches per line MAX. Many changes = many lines.
+{"type":"full","html":"..."} - only when no HTML exists or 50%+ restructure needed
 
 JSON ESCAPING: Use single quotes for HTML attributes to avoid escaping.
 CORRECT: {"html":"<div class='flex'>"}
