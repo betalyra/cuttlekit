@@ -1,177 +1,220 @@
-# Fail-Fast Patch Validation
+# Fail-Fast Patch Validation with Retry
 
 ## Problem
 
-Currently, patch parsing can fail due to:
+Patch parsing can fail due to:
 1. Invalid JSON from LLM (malformed, extra characters, non-minified)
 2. Invalid patch structure (missing fields, wrong types)
 3. Invalid patch target (selector doesn't exist in DOM)
 4. Invalid patch content (malformed HTML)
 
-These failures are detected late, after the full stream completes, wasting tokens and time.
-
-## Goal
-
-Validate patches **as they stream** and fail fast on the first invalid patch. Then retry with a corrective prompt.
+These failures need to be detected **as they stream** to fail fast and retry with a corrective prompt.
 
 ## Architecture
 
 ```
-┌─────────────┐    ┌──────────────┐    ┌───────────────┐    ┌─────────────┐
-│ LLM Stream  │───▶│ Accumulate   │───▶│ Parse & Val.  │───▶│ Apply Patch │
-│ (tokens)    │    │ Lines        │    │ (Zod + DOM)   │    │ (happy-dom) │
-└─────────────┘    └──────────────┘    └───────────────┘    └─────────────┘
-                                              │
-                                              ▼ on error
-                                       ┌─────────────┐
-                                       │ Stop Stream │
-                                       │ + Retry     │
-                                       └─────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                         streamUnified()                          │
+├─────────────────────────────────────────────────────────────────┤
+│  1. Build messages from options                                  │
+│  2. Create validation document (happy-dom)                       │
+│  3. Call runWithRetry()                                         │
+│  4. Stream collected responses + stats                          │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    runWithRetry() - Effect.iterate              │
+├─────────────────────────────────────────────────────────────────┤
+│  State: { attempt, messages, allResponses, done, usagePromises }│
+│                                                                  │
+│  while (!done && attempt < MAX_ATTEMPTS):                       │
+│    1. Call runAttempt(messages, validationDoc)                  │
+│    2. If success: done = true, collect responses                │
+│    3. If failed: append corrective prompt, increment attempt    │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                runAttempt() - Stream with mapAccumEffect        │
+├─────────────────────────────────────────────────────────────────┤
+│  1. Start LLM stream                                            │
+│  2. Parse JSONL lines                                           │
+│  3. Validate patches with mapAccumEffect:                       │
+│     - Success: accumulate response, emit StreamItemResponse     │
+│     - Failure: emit StreamItemError with collected responses    │
+│  4. takeUntil error                                             │
+│  5. Return AttemptResult (Success or ValidationFailed)          │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ## Design Principles
 
-1. **Functional / Immutable**: No array mutation. Use Effect's functional patterns.
-2. **Composable**: Design for integration with future processor architecture (see PROCESSOR.md).
-3. **Pure Functions**: Validation and retry logic as pure functions that can be tested in isolation.
+1. **Functional/Immutable State**: All state transitions are pure, no array mutation
+2. **Error as Data**: Validation errors are captured as data, not thrown exceptions
+3. **Effect.iterate**: Retry loop uses Effect's iterate for functional iteration
+4. **Stream.mapAccumEffect**: Threading state through streams without mutation
 
-## Implementation Status
+## Implementation
 
-### ✅ Completed
-
-#### 1. Shared Patch Utilities (`@betalyra/generative-ui-common/client`)
-
-```typescript
-export type Patch = { selector: string; ... }
-export type ApplyPatchResult = { _tag: "Success" } | { _tag: "ElementNotFound"; selector: string } | ...
-export const applyPatch = (doc: Document, patch: Patch): ApplyPatchResult
-```
-
-#### 2. PatchValidator Service (`services/patch-validator.ts`)
-
-Validates patches by **actually applying them** to a temporary happy-dom document.
-
-#### 3. Stream Line Accumulation (`stream/utils.ts`)
-
-Accumulates tokens into complete JSONL lines using `Stream.mapAccum`.
-
-### 🚧 TODO: Functional Retry Loop
-
-#### Retry State (Immutable)
+### Key Types
 
 ```typescript
-type RetryState = {
+// Result of a single stream attempt
+type AttemptResult =
+  | { _tag: "Success"; responses: readonly UnifiedResponse[] }
+  | { _tag: "ValidationFailed"; validResponses: readonly UnifiedResponse[]; error: PatchValidationError };
+
+// Stream item during processing - error as data pattern
+type StreamItem =
+  | { _tag: "Response"; response: UnifiedResponse; collected: readonly UnifiedResponse[] }
+  | { _tag: "Error"; error: PatchValidationError; collected: readonly UnifiedResponse[] };
+
+// Immutable state for retry loop
+type IterateState = {
   readonly attempt: number;
-  readonly appliedPatches: readonly Patch[];
-  readonly validationDoc: Document;
-  readonly previousError?: PatchValidationError;
-};
-
-const initialRetryState = (validationDoc: Document): RetryState => ({
-  attempt: 1,
-  appliedPatches: [],
-  validationDoc,
-  previousError: undefined,
-});
-```
-
-#### Pure Functions for Retry Logic
-
-```typescript
-// Pure function: compute next state after successful patches
-const addAppliedPatches = (
-  state: RetryState,
-  patches: readonly Patch[]
-): RetryState => ({
-  ...state,
-  appliedPatches: [...state.appliedPatches, ...patches],
-});
-
-// Pure function: compute next state after failure
-const nextAttempt = (
-  state: RetryState,
-  error: PatchValidationError
-): RetryState => ({
-  ...state,
-  attempt: state.attempt + 1,
-  previousError: error,
-});
-
-// Pure function: build corrective prompt from state
-const buildCorrectivePrompt = (state: RetryState): string | null => {
-  if (!state.previousError || state.attempt === 1) return null;
-  // ... build prompt from state
+  readonly messages: readonly Message[];
+  readonly allResponses: readonly UnifiedResponse[];
+  readonly done: boolean;
+  readonly lastError?: PatchValidationError;
+  readonly usagePromises: readonly PromiseLike<unknown>[];
 };
 ```
 
-#### Functional Stream Processing
+### Error as Data Pattern
 
-Instead of mutating arrays, use `Stream.mapAccum` to thread state through the stream:
+Instead of failing the stream when validation fails, we emit the error as a data item:
 
 ```typescript
-// Process stream with immutable state threading
-const processWithValidation = (
-  stream: Stream<UnifiedResponse, Error>,
-  initialState: RetryState
-): Stream<{ response: UnifiedResponse; state: RetryState }, PatchValidationError> =>
-  pipe(
-    stream,
-    Stream.mapAccum(initialState, (state, response) => {
+Stream.mapAccumEffect(
+  [] as readonly UnifiedResponse[],
+  (collected, response): Effect.Effect<readonly [readonly UnifiedResponse[], StreamItem], never, never> =>
+    Effect.gen(function* () {
       if (response.type === "patches") {
-        // Validate and return new state
-        const newState = addAppliedPatches(state, response.patches);
-        return [newState, { response, state: newState }];
+        const validationResult = yield* patchValidator
+          .validateAll(validationDoc, response.patches)
+          .pipe(Effect.either);
+
+        if (Either.isLeft(validationResult)) {
+          // Emit error as data, don't fail the stream
+          const item: StreamItem = { _tag: "Error", error: validationResult.left, collected };
+          return [collected, item] as const;
+        }
       }
-      return [state, { response, state }];
+
+      // Valid response - accumulate
+      const newCollected = [...collected, response];
+      const item: StreamItem = { _tag: "Response", response, collected: newCollected };
+      return [newCollected, item] as const;
     })
-  );
+)
 ```
 
-#### Recursive Retry with Effect.iterate
+This allows us to:
+1. Capture partial results before the error
+2. Continue processing in the retry loop
+3. Maintain functional purity
 
-Use `Effect.iterate` for functional retry without mutation:
+### Retry Loop with Effect.iterate
 
 ```typescript
-const generateWithRetry = (options: GenerateOptions) =>
-  Effect.iterate(
-    initialRetryState(validationDoc),
-    {
-      while: (state) => state.attempt <= MAX_ATTEMPTS,
-      body: (state) =>
-        pipe(
-          createStream(options, state),
-          Stream.runCollect,
-          Effect.matchEffect({
-            onSuccess: (responses) => Effect.succeed({ done: true, responses, state }),
-            onFailure: (error) =>
-              error instanceof PatchValidationError
-                ? Effect.succeed({ done: false, state: nextAttempt(state, error) })
-                : Effect.fail(error),
-          })
-        ),
-    }
-  );
+Effect.iterate(initialState, {
+  while: (s): s is IterateState => !s.done && s.attempt < MAX_RETRY_ATTEMPTS,
+  body: (state): Effect.Effect<IterateState, Error> =>
+    Effect.gen(function* () {
+      const result = yield* runAttempt(state.messages, validationDoc);
+
+      if (result._tag === "Success") {
+        return {
+          ...state,
+          allResponses: [...state.allResponses, ...result.responses],
+          done: true,
+          usagePromises: [...state.usagePromises, result.usagePromise],
+        } satisfies IterateState;
+      }
+
+      // Retry with corrective prompt
+      const correctiveMessage: Message = {
+        role: "user",
+        content: buildCorrectivePrompt(result.error),
+      };
+
+      return {
+        attempt: state.attempt + 1,
+        messages: [...state.messages, correctiveMessage],
+        allResponses: [...state.allResponses, ...result.validResponses],
+        done: false,
+        lastError: result.error,
+        usagePromises: [...state.usagePromises, result.usagePromise],
+      } satisfies IterateState;
+    }),
+});
 ```
 
-## Integration with Processor Architecture
+### Corrective Prompts
 
-This validation logic will be used by the session processor (see PROCESSOR.md):
+When validation fails, we append a corrective prompt:
 
+```typescript
+const buildCorrectivePrompt = (error: PatchValidationError): string =>
+  `ERROR: Patch validation failed for selector "${error.patch.selector}": ${error.message}
+Reason: ${error.reason}
+Please fix the patch and continue. Remember:
+- Selectors must exist in the current HTML
+- If the element doesn't exist yet, create it first with a "full" response
+- Use only #id selectors, not class or tag selectors`;
 ```
-┌─────────────┐     ┌───────────────┐     ┌─────────────────┐
-│ Message     │────▶│ Processor     │────▶│ Validate &      │
-│ Queue       │     │ (batches msgs)│     │ Apply Patches   │
-└─────────────┘     └───────────────┘     └─────────────────┘
+
+### Usage Aggregation
+
+Since retries create multiple LLM calls, we aggregate token usage:
+
+```typescript
+const aggregatedUsage = (usages as Usage[]).reduce<AggregatedUsage>(
+  (acc, usage) => ({
+    inputTokens: acc.inputTokens + (usage.inputTokens ?? 0),
+    outputTokens: acc.outputTokens + (usage.outputTokens ?? 0),
+    totalTokens: acc.totalTokens + (usage.totalTokens ?? 0),
+    cachedTokens: acc.cachedTokens + (usage.inputTokenDetails?.cacheReadTokens ?? 0),
+  }),
+  initialUsage
+);
 ```
 
-The fail-fast validation becomes a **step** in the processor's message handling:
-1. Processor dequeues batched messages (prompts + actions)
-2. Processor calls LLM with batched context
-3. **Validation step validates patches as they stream**
-4. On failure, processor can retry with corrective context
-5. Valid patches are applied to session vdom and sent to client
+## Components
 
-## Error Types
+### PatchValidator Service (`services/patch-validator.ts`)
+
+Validates patches by **actually applying them** to a temporary happy-dom document:
+
+```typescript
+export class PatchValidator extends Effect.Service<PatchValidator>()("PatchValidator", {
+  effect: Effect.gen(function* () {
+    const validate = (doc: Document, patch: Patch) =>
+      Effect.gen(function* () {
+        const result = applyPatch(doc, patch);
+        if (result._tag === "ElementNotFound") {
+          yield* new PatchValidationError({ patch, reason: "selector_not_found", ... });
+        }
+        return patch;
+      });
+
+    const validateAll = (doc: Document, patches: readonly Patch[]) =>
+      Effect.forEach(patches, (patch) => validate(doc, patch));
+
+    const createValidationDocument = (html: string) =>
+      Effect.sync(() => {
+        const window = new Window();
+        window.document.body.innerHTML = html;
+        return window.document as unknown as Document;
+      });
+
+    return { validate, validateAll, createValidationDocument };
+  }),
+}) {}
+```
+
+### Error Types
 
 ```typescript
 export type PatchValidationErrorReason =
@@ -186,19 +229,24 @@ export class PatchValidationError extends Data.TaggedError("PatchValidationError
 }> {}
 ```
 
-## Considerations
+## Trade-offs
 
-### Validation Document Strategy
-- Create a **copy** of the current session DOM for validation
-- Apply patches to the copy first
-- Only if all patches validate, apply to the real session DOM
+### Current Implementation (Collect then Stream)
 
-### Functional State Management
-- Use immutable state objects
-- Thread state through streams with `mapAccum`
-- Use `Effect.iterate` for retry loops instead of while loops with mutation
+The current implementation collects all responses before streaming them to the client:
 
-### Future: Processor Integration
-- Validation logic should be a composable function
-- Can be called by the processor for each LLM response batch
-- State (applied patches, retry count) managed by processor, not globally
+**Pros:**
+- Simple, pure functional implementation
+- Guaranteed valid responses only
+- Easy to reason about
+
+**Cons:**
+- User waits for entire generation (including retries) before seeing any UI
+- Higher latency for initial response
+
+### Future: Processor Architecture
+
+See [PROCESSOR.md](./PROCESSOR.md) for the planned durable stream architecture that will:
+- Stream valid responses immediately
+- Handle retries transparently via message queue
+- Support page refresh resumability
