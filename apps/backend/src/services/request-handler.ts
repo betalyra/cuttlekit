@@ -1,7 +1,7 @@
 import { Effect, Stream } from "effect";
 import { UIService } from "./ui.js";
 import type { Request } from "../types/messages.js";
-import type { Patch } from "./vdom.js";
+import type { Patch } from "./vdom/index.js";
 
 // Stream event types for SSE responses
 export type StreamEvent =
