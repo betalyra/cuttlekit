@@ -3,10 +3,11 @@ import { streamText } from "ai";
 import { LlmProvider } from "@betalyra/generative-ui-common/server";
 import { StorageService } from "../storage.js";
 import { accumulateLinesWithFlush } from "../../stream/utils.js";
-import { PatchValidator } from "../patch-validator.js";
+import { PatchValidator } from "../vdom/index.js";
 import {
   PatchSchema,
   UnifiedResponseSchema,
+  JsonParseError,
   type UnifiedResponse,
   type UnifiedGenerateOptions,
   type Message,
@@ -31,37 +32,39 @@ export class GenerateService extends Effect.Service<GenerateService>()(
       const patchValidator = yield* PatchValidator;
 
       // ============================================================
-      // Parse JSON line - pure function
+      // Parse JSON line - fails with JsonParseError for retry
       // ============================================================
       const parseJsonLine = (line: string) =>
-        Effect.try({
-          try: () => {
-            const parsed = JSON.parse(line);
+        Effect.gen(function* () {
+          const parseResult = yield* Effect.try({
+            try: () => JSON.parse(line),
+            catch: (error) =>
+              new JsonParseError({
+                line,
+                message: error instanceof Error ? error.message : String(error),
+              }),
+          });
 
-            // Try parsing as UnifiedResponse first
-            const unifiedResult = UnifiedResponseSchema.safeParse(parsed);
-            if (unifiedResult.success) {
-              return unifiedResult.data;
-            }
+          // Try parsing as UnifiedResponse first
+          const unifiedResult = UnifiedResponseSchema.safeParse(parseResult);
+          if (unifiedResult.success) {
+            return unifiedResult.data;
+          }
 
-            // Fallback: check if it's a raw patch and wrap it
-            const patchResult = PatchSchema.safeParse(parsed);
-            if (patchResult.success) {
-              return {
-                type: "patches" as const,
-                patches: [patchResult.data],
-              };
-            }
+          // Fallback: check if it's a raw patch and wrap it
+          const patchResult = PatchSchema.safeParse(parseResult);
+          if (patchResult.success) {
+            return {
+              type: "patches" as const,
+              patches: [patchResult.data],
+            };
+          }
 
-            // Neither valid - throw with details
-            throw new Error(
-              `Invalid response format: ${unifiedResult.error.message}`
-            );
-          },
-          catch: (error) =>
-            error instanceof Error
-              ? error
-              : new Error(`Failed to parse JSON line: ${line}`),
+          // Neither valid - fail with JsonParseError
+          return yield* new JsonParseError({
+            line,
+            message: `Invalid response format: ${unifiedResult.error.message}`,
+          });
         });
 
       // ============================================================
@@ -98,11 +101,26 @@ export class GenerateService extends Effect.Service<GenerateService>()(
             tokenStream,
             accumulateLinesWithFlush,
             Stream.tap((line) => Effect.log("Line", { line })),
-            Stream.mapEffect(parseJsonLine),
             Stream.mapAccumEffect(
               [] as readonly UnifiedResponse[],
-              (collected, response): Effect.Effect<readonly [readonly UnifiedResponse[], StreamItem], never, never> =>
+              (collected, line): Effect.Effect<readonly [readonly UnifiedResponse[], StreamItem], never, never> =>
                 Effect.gen(function* () {
+                  // Parse JSON line - catch errors as data
+                  const parseResult = yield* parseJsonLine(line).pipe(Effect.either);
+
+                  if (Either.isLeft(parseResult)) {
+                    // JSON parsing failed - emit error with collected responses
+                    const item: StreamItem = {
+                      _tag: "Error",
+                      error: parseResult.left,
+                      collected,
+                    };
+                    return [collected, item] as const;
+                  }
+
+                  const response = parseResult.right;
+
+                  // Validate patches
                   if (response.type === "patches") {
                     const validationResult = yield* patchValidator
                       .validateAll(validationDoc, response.patches)
@@ -191,11 +209,16 @@ export class GenerateService extends Effect.Service<GenerateService>()(
                   } satisfies IterateState;
                 }
 
-                // Validation failed - prepare retry with corrective prompt
-                yield* Effect.log("Validation failed, preparing retry", {
+                // Generation failed - prepare retry with corrective prompt
+                const errorDetails =
+                  result.error._tag === "JsonParseError"
+                    ? { type: "json_parse", line: result.error.line.slice(0, 100) }
+                    : { type: "validation", selector: result.error.patch.selector, reason: result.error.reason };
+
+                yield* Effect.log("Generation failed, preparing retry", {
                   attempt: state.attempt + 1,
                   error: result.error.message,
-                  selector: result.error.patch.selector,
+                  ...errorDetails,
                   validResponsesCollected: result.validResponses.length,
                 });
 

@@ -1,4 +1,4 @@
-import type { PatchValidationError } from "../patch-validator.js";
+import type { GenerationError } from "./errors.js";
 
 export const MAX_RETRY_ATTEMPTS = 3;
 
@@ -41,11 +41,21 @@ ICONS: <iconify-icon icon="mdi:plus"></iconify-icon> Any Iconify set (mdi, lucid
 
 FONTS: Any Fontsource font via style="font-family: 'FontName'". Default Inter. Common: Roboto, Libre Baskerville, JetBrains Mono, Space Grotesk, Poppins.`;
 
-// Build corrective prompt for retry after validation failure
-export const buildCorrectivePrompt = (error: PatchValidationError): string =>
-  `ERROR: Patch validation failed for selector "${error.patch.selector}": ${error.message}
+// Build corrective prompt for retry after error
+export const buildCorrectivePrompt = (error: GenerationError): string => {
+  if (error._tag === "JsonParseError") {
+    return `ERROR: Invalid JSON in your response: ${error.message}
+Line: ${error.line.slice(0, 200)}${error.line.length > 200 ? "..." : ""}
+Please output valid JSONL. Each line must be a complete, valid JSON object.
+- One JSON object per line
+- No trailing commas
+- Use single quotes for HTML attributes to avoid escaping issues`;
+  }
+
+  return `ERROR: Patch validation failed for selector "${error.patch.selector}": ${error.message}
 Reason: ${error.reason}
 Please fix the patch and continue. Remember:
 - Selectors must exist in the current HTML
 - If the element doesn't exist yet, create it first with a "full" response or parent patch
 - Use only #id selectors, not class or tag selectors`;
+};

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { PatchValidationError } from "../patch-validator.js";
+import type { GenerationError } from "./errors.js";
 
 // ============================================================
 // Zod Schemas
@@ -64,7 +64,7 @@ export type AttemptResult =
   | {
       readonly _tag: "ValidationFailed";
       readonly validResponses: readonly UnifiedResponse[];
-      readonly error: PatchValidationError;
+      readonly error: GenerationError;
     };
 
 // Stream item during processing - error as data pattern
@@ -76,7 +76,7 @@ export type StreamItemResponse = {
 
 export type StreamItemError = {
   readonly _tag: "Error";
-  readonly error: PatchValidationError;
+  readonly error: GenerationError;
   readonly collected: readonly UnifiedResponse[];
 };
 
@@ -88,7 +88,7 @@ export type IterateState = {
   readonly messages: readonly Message[];
   readonly allResponses: readonly UnifiedResponse[];
   readonly done: boolean;
-  readonly lastError?: PatchValidationError;
+  readonly lastError?: GenerationError;
   readonly usagePromises: readonly PromiseLike<unknown>[];
 };
 

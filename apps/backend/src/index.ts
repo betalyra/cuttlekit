@@ -13,10 +13,9 @@ import { GenerateService } from "./services/generate/index.js";
 import { GoogleService, GroqService } from "@betalyra/generative-ui-common/server";
 import { SessionService } from "./services/session.js";
 import { StorageService } from "./services/storage.js";
-import { VdomService } from "./services/vdom.js";
+import { VdomService, PatchValidator } from "./services/vdom/index.js";
 import { UIService } from "./services/ui.js";
 import { RequestHandlerService } from "./services/request-handler.js";
-import { PatchValidator } from "./services/patch-validator.js";
 
 // Storage layer based on STORAGE env var (memory | file)
 const StorageLayerLive = Layer.unwrapEffect(
