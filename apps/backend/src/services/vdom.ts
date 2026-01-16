@@ -1,21 +1,12 @@
 import { Array as A, Effect, pipe, Ref } from "effect"
 import { Window } from "happy-dom"
+import {
+  applyPatch,
+  type Patch,
+  type ApplyPatchResult,
+} from "@betalyra/generative-ui-common/client"
 
-// ============================================================
-// Patch Types - What the LLM generates
-// ============================================================
-
-export type Patch =
-  | { selector: string; text: string }
-  | { selector: string; attr: Record<string, string | null> }
-  | { selector: string; append: string }
-  | { selector: string; prepend: string }
-  | { selector: string; html: string }
-  | { selector: string; remove: true }
-
-export type PatchResult =
-  | { _tag: "Success" }
-  | { _tag: "Error"; error: string }
+export type { Patch }
 
 export type ApplyPatchesResult = {
   applied: number
@@ -33,39 +24,6 @@ export class VdomService extends Effect.Service<VdomService>()("VdomService", {
   effect: Effect.gen(function* () {
     // Store happy-dom Window instances per session
     const windowsRef = yield* Ref.make(new Map<string, Window>())
-
-    const applyPatch = (doc: Document, patch: Patch): Effect.Effect<PatchResult> =>
-      Effect.sync(() => {
-        const el = doc.querySelector(patch.selector)
-        if (!el) {
-          return { _tag: "Error" as const, error: `Element not found: ${patch.selector}` }
-        }
-
-        try {
-          if ("text" in patch) {
-            el.textContent = patch.text
-          } else if ("attr" in patch) {
-            Object.entries(patch.attr).forEach(([key, value]) => {
-              if (value === null) {
-                el.removeAttribute(key)
-              } else {
-                el.setAttribute(key, value)
-              }
-            })
-          } else if ("append" in patch) {
-            el.insertAdjacentHTML("beforeend", patch.append)
-          } else if ("prepend" in patch) {
-            el.insertAdjacentHTML("afterbegin", patch.prepend)
-          } else if ("html" in patch) {
-            el.innerHTML = patch.html
-          } else if ("remove" in patch) {
-            el.remove()
-          }
-          return { _tag: "Success" as const }
-        } catch (e) {
-          return { _tag: "Error" as const, error: `Failed to apply patch: ${e}` }
-        }
-      })
 
     const createSession = (sessionId: string) =>
       Effect.gen(function* () {
@@ -120,15 +78,19 @@ export class VdomService extends Effect.Service<VdomService>()("VdomService", {
           }
         }
 
-        const results = yield* pipe(
-          patches,
-          Effect.forEach((patch) => applyPatch(window.document as unknown as Document, patch))
-        )
+        const doc = window.document as unknown as Document
+        const results = patches.map((patch) => applyPatch(doc, patch))
 
         const errors = pipe(
           results,
-          A.filter((r): r is { _tag: "Error"; error: string } => r._tag === "Error"),
-          A.map((r) => r.error)
+          A.filter((r): r is ApplyPatchResult & { _tag: "ElementNotFound" | "Error" } =>
+            r._tag === "ElementNotFound" || r._tag === "Error"
+          ),
+          A.map((r) =>
+            r._tag === "ElementNotFound"
+              ? `Element not found: ${r.selector}`
+              : `Error: ${r.error}`
+          )
         )
 
         const applied = pipe(
@@ -137,7 +99,7 @@ export class VdomService extends Effect.Service<VdomService>()("VdomService", {
           A.length
         )
 
-        const html = yield* Effect.sync(() => window.document.body.innerHTML)
+        const html = window.document.body.innerHTML
 
         return { applied, total: patches.length, errors, html }
       })

@@ -16,6 +16,7 @@ import { StorageService } from "./services/storage.js";
 import { VdomService } from "./services/vdom.js";
 import { UIService } from "./services/ui.js";
 import { RequestHandlerService } from "./services/request-handler.js";
+import { PatchValidator } from "./services/patch-validator.js";
 
 // Storage layer based on STORAGE env var (memory | file)
 const StorageLayerLive = Layer.unwrapEffect(
@@ -66,7 +67,8 @@ const StorageWithKV = StorageService.Default.pipe(
 
 const GenerateWithDeps = GenerateService.Default.pipe(
   Layer.provide(StorageWithKV),
-  Layer.provide(LlmLayerLive)
+  Layer.provide(LlmLayerLive),
+  Layer.provide(PatchValidator.Default)
 );
 
 const UIWithDeps = UIService.Default.pipe(

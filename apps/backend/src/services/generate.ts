@@ -1,13 +1,10 @@
 import { Effect, Stream, pipe, DateTime, Duration } from "effect";
-import {
-  streamText,
-  wrapLanguageModel,
-  type LanguageModelMiddleware,
-} from "ai";
+import { streamText, type LanguageModelMiddleware } from "ai";
 import { z } from "zod";
 import { LlmProvider } from "@betalyra/generative-ui-common/server";
 import { StorageService } from "./storage.js";
 import { accumulateLinesWithFlush } from "../stream/utils.js";
+import { PatchValidator } from "./patch-validator.js";
 
 // Logging middleware to inspect prompts sent to LLM
 const loggingMiddleware: LanguageModelMiddleware = {
@@ -73,6 +70,9 @@ const UnifiedResponseSchema = z.union([
 
 export type UnifiedResponse = z.infer<typeof UnifiedResponseSchema>;
 
+// NOTE: Retry mechanism will be implemented in the processor layer (see docs/PROCESSOR.md)
+// For now, validation fails fast and the stream stops on first invalid patch.
+
 // Streaming system prompt - compact but complete
 const STREAMING_PATCH_PROMPT = `You are a Generative UI Engine.
 
@@ -127,6 +127,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
     effect: Effect.gen(function* () {
       const llm = yield* LlmProvider;
       const storage = yield* StorageService;
+      const patchValidator = yield* PatchValidator;
 
       const streamUnified = (
         options: UnifiedGenerateOptions
@@ -255,12 +256,35 @@ export class GenerateService extends Effect.Service<GenerateService>()(
                 : new Error(`Stream error: ${String(error)}`)
           );
 
+          // Create validation document from current HTML (or empty)
+          const validationDoc = yield* patchValidator.createValidationDocument(
+            currentHtml ?? ""
+          );
+
           const contentStream = pipe(
             tokenStream,
             accumulateLinesWithFlush,
             Stream.tap((line) => Effect.log("Line", { line })),
             // Parse each line as JSON
             Stream.mapEffect((line) => parseJsonLine(line)),
+            // Validate patches before emitting (fail-fast)
+            Stream.mapEffect((response) =>
+              Effect.gen(function* () {
+                if (response.type === "patches") {
+                  yield* patchValidator
+                    .validateAll(validationDoc, response.patches)
+                    .pipe(
+                      Effect.mapError(
+                        (err) =>
+                          new Error(
+                            `Patch validation failed: ${err.message} (${err.reason})`
+                          )
+                      )
+                    );
+                }
+                return response;
+              })
+            ),
             // Log parsed response
             Stream.tap((response) =>
               Effect.logDebug("Parsed response", {
