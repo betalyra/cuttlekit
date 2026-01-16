@@ -55,3 +55,11 @@ See [docs/APPROACH.md](docs/APPROACH.md) for the development journey and key dec
 
 ### Hybrid AI Architecture
 - **Browser-side AI for minor updates** - Use lightweight models (Chrome's Gemini Nano) for simple operations locally. Server generates templates, browser AI fills them in. Zero latency for cached actions.
+
+## License
+
+This software is licensed under the [O'Saasy License Agreement](./LICENSE.md).
+
+**You are free to use, modify, and distribute this software** for personal projects, internal tools, or any use where you're not reselling the software's functionality itself.
+
+**A commercial license is required** if you want to offer this software (or derivatives) as a hosted, managed, or SaaS product where the primary value is the software's functionality. [Contact us](https://cal.com/betalyra/30min) for commercial licensing.
