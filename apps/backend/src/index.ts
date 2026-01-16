@@ -9,7 +9,7 @@ import { Config, Effect, Layer, Logger, LogLevel } from "effect";
 import { createServer } from "node:http";
 
 import { api, healthGroupLive, makeGenerateGroupLive } from "./api.js";
-import { GenerateService } from "./services/generate.js";
+import { GenerateService } from "./services/generate/index.js";
 import { GoogleService, GroqService } from "@betalyra/generative-ui-common/server";
 import { SessionService } from "./services/session.js";
 import { StorageService } from "./services/storage.js";

@@ -1,5 +1,5 @@
 import { Effect, Stream, Match, pipe } from "effect";
-import { GenerateService, type UnifiedResponse } from "./generate.js";
+import { GenerateService, type UnifiedResponse } from "./generate/index.js";
 import { SessionService } from "./session.js";
 import { VdomService, type Patch } from "./vdom.js";
 
