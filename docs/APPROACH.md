@@ -392,6 +392,32 @@ const UnifiedResponseSchema = z.union([
 
 ---
 
+## Step 21: Fail-Fast Patch Validation with Retry
+
+**Problem:** LLM sometimes generates invalid patches - malformed JSON, selectors that don't exist, or broken HTML. These errors would crash the stream or corrupt the UI state.
+
+**Solution:** Validate patches during streaming using a temporary DOM, fail fast on first error, and retry with a corrective prompt.
+
+**How it works:**
+1. Create a validation document (happy-dom) from current HTML before streaming
+2. As each patch streams in, apply it to the validation document
+3. If validation fails: stop streaming, capture valid responses so far, append corrective prompt
+4. Retry up to 3 times with context about what went wrong
+5. AI sees the error and fixes its approach
+
+**Key patterns:**
+- **Error as data** - Validation errors are emitted as stream items, not thrown exceptions
+- **Effect.iterate** - Functional retry loop with immutable state
+- **Stream.mapAccumEffect** - Threading accumulated responses through the stream
+
+**Error types handled:**
+- `JsonParseError` - Malformed JSON in LLM output
+- `PatchValidationError` - Selector not found, empty selector, apply error
+
+**Result:** Invalid patches trigger automatic retry with helpful context. Users see clean UI updates even when LLM makes mistakes.
+
+---
+
 ## Key Takeaways
 
 1. **Plain HTML over JSX** - AI can steer a responsive frontend by generating plain HTML
@@ -401,3 +427,4 @@ const UnifiedResponseSchema = z.union([
 5. **Patches over full regeneration** - Small updates are fast and cheap
 6. **Graceful degradation** - Patch failures automatically fall back to full regeneration
 7. **Separate prompt/action history** - Maximizes cache hits by keeping prompts as stable prefix
+8. **Fail-fast with corrective retry** - Validate patches during streaming, retry with error context if invalid

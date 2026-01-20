@@ -1,0 +1,22 @@
+{
+    "name": "@betalyra/generative-ui-experiments",
+    "private": true,
+    "version": "0.0.0",
+    "type": "module",
+    "scripts": {
+        "dev": "tsx watch src/sandbox.ts",
+        "sandbox": "tsx src/sandbox.ts",
+        "agent": "tsx src/agent.ts",
+        "vector-search": "tsx src/vector-search.ts",
+        "build": "tsdown"
+    },
+    "dependencies": {
+        "@betalyra/generative-ui-common": "workspace:*",
+        "@deno/sandbox": "^0.8.0",
+        "@huggingface/transformers": "^3.8.1",
+        "@libsql/client": "^0.17.0",
+        "@linear/sdk": "^70.0.0",
+        "drizzle-orm": "^0.45.1",
+        "microsandbox": "^0.1.1"
+    }
+}
