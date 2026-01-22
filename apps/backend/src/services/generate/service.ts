@@ -1,9 +1,9 @@
 import { Effect, Stream, pipe, DateTime, Duration, Ref } from "effect";
-import { streamText, type TextStreamPart, type LanguageModelUsage } from "ai";
-import { LlmProvider } from "@betalyra/generative-ui-common/server";
+import { streamText } from "ai";
+import { LanguageModelProvider } from "@betalyra/generative-ui-common/server";
 import { StorageService } from "../storage.js";
 import { accumulateLinesWithFlush } from "../../stream/utils.js";
-import { PatchValidator } from "../vdom/index.js";
+import { PatchValidator, type Patch } from "../vdom/index.js";
 import {
   PatchSchema,
   UnifiedResponseSchema,
@@ -25,7 +25,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
   {
     accessors: true,
     effect: Effect.gen(function* () {
-      const llm = yield* LlmProvider;
+      const { model, providerOptions } = yield* LanguageModelProvider;
       const storage = yield* StorageService;
       const patchValidator = yield* PatchValidator;
 
@@ -85,18 +85,6 @@ export class GenerateService extends Effect.Service<GenerateService>()(
         });
 
       // ============================================================
-      // Convert AI SDK LanguageModelUsage to our Usage type
-      // ============================================================
-      const convertUsage = (sdkUsage: LanguageModelUsage): Usage => ({
-        inputTokens: sdkUsage.inputTokens ?? 0,
-        outputTokens: sdkUsage.outputTokens ?? 0,
-        totalTokens: sdkUsage.totalTokens ?? 0,
-        inputTokenDetails: {
-          cacheReadTokens: sdkUsage.inputTokenDetails?.cacheReadTokens ?? 0,
-        },
-      });
-
-      // ============================================================
       // Create attempt stream - uses fullStream for usage tracking
       // ============================================================
       const createAttemptStream = (
@@ -106,14 +94,10 @@ export class GenerateService extends Effect.Service<GenerateService>()(
       ): Stream.Stream<UnifiedResponse, GenerationError | Error> =>
         Stream.unwrap(
           Effect.gen(function* () {
-            const wrappedModel = llm.provider.languageModel("openai/gpt-oss-120b");
-
             const result = streamText({
-              model: wrappedModel,
+              model,
               messages: messages as Message[],
-              providerOptions: {
-                openai: { streamOptions: { includeUsage: true } },
-              },
+              providerOptions,
             });
 
             // Use fullStream to get both text AND usage events
@@ -130,18 +114,45 @@ export class GenerateService extends Effect.Service<GenerateService>()(
               // Extract text from text-delta, track usage from finish
               Stream.mapEffect((part) =>
                 Effect.gen(function* () {
-                  const p = part as TextStreamPart<Record<string, never>>;
-                  if (p.type === "finish" && p.totalUsage) {
-                    // Track usage when we see the finish event
-                    yield* Ref.update(usageRef, (usages) => [
-                      ...usages,
-                      convertUsage(p.totalUsage),
-                    ]);
-                    return null; // Don't emit finish event as text
+                  // Cast to access raw data - AI SDK types are incomplete
+                  const raw = part as Record<string, unknown>;
+
+                  // Capture usage from finish-step (has raw provider data with cached_tokens)
+                  if (raw.type === "finish-step") {
+                    const usage = raw.usage as {
+                      inputTokens?: number;
+                      outputTokens?: number;
+                      totalTokens?: number;
+                      raw?: {
+                        prompt_tokens_details?: { cached_tokens?: number };
+                      };
+                    } | undefined;
+
+                    if (usage) {
+                      const cachedTokens =
+                        usage.raw?.prompt_tokens_details?.cached_tokens ?? 0;
+
+                      yield* Ref.update(usageRef, (usages) => [
+                        ...usages,
+                        {
+                          inputTokens: usage.inputTokens ?? 0,
+                          outputTokens: usage.outputTokens ?? 0,
+                          totalTokens: usage.totalTokens ?? 0,
+                          inputTokenDetails: { cacheReadTokens: cachedTokens },
+                        },
+                      ]);
+                    }
+                    return null;
                   }
-                  if (p.type === "text-delta") {
-                    return p.text;
+
+                  if (raw.type === "finish") {
+                    return null; // Skip finish, we already captured from finish-step
                   }
+
+                  if (raw.type === "text-delta") {
+                    return (raw as { text: string }).text;
+                  }
+
                   return null; // Ignore other event types
                 })
               ),
@@ -163,6 +174,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
         messages: readonly Message[],
         validationDoc: Document,
         usageRef: Ref.Ref<Usage[]>,
+        patchesRef: Ref.Ref<Patch[]>,
         attempt: number
       ): Stream.Stream<UnifiedResponse, Error> => {
         if (attempt >= MAX_RETRY_ATTEMPTS) {
@@ -174,10 +186,15 @@ export class GenerateService extends Effect.Service<GenerateService>()(
         return pipe(
           createAttemptStream(messages, validationDoc, usageRef),
 
-          // Log successful emissions
+          // Track successful patches and log
           Stream.tap((response) =>
-            Effect.log(`[Attempt ${attempt}] Emitting response`, {
-              type: response.type,
+            Effect.gen(function* () {
+              if (response.type === "patches") {
+                yield* Ref.update(patchesRef, (ps) => [...ps, ...response.patches]);
+              }
+              yield* Effect.log(`[Attempt ${attempt}] Emitting response`, {
+                type: response.type,
+              });
             })
           ),
 
@@ -189,21 +206,26 @@ export class GenerateService extends Effect.Service<GenerateService>()(
             }
 
             const genError = error as GenerationError;
-            return pipe(
-              Stream.fromEffect(
-                Effect.log(`[Attempt ${attempt}] ${genError._tag}, retrying...`, {
+            return Stream.unwrap(
+              Effect.gen(function* () {
+                const successfulPatches = yield* Ref.get(patchesRef);
+                yield* Ref.set(patchesRef, []); // Reset for next attempt
+                yield* Effect.log(`[Attempt ${attempt}] ${genError._tag}, retrying...`, {
                   error: genError.message,
-                })
-              ),
-              Stream.drain,
-              Stream.concat(
-                createStreamWithRetry(
-                  [...messages, { role: "user", content: buildCorrectivePrompt(genError) }],
-                  validationDoc,
-                  usageRef,
-                  attempt + 1
-                )
-              )
+                  successfulPatches: successfulPatches.length,
+                });
+
+                return Stream.concat(
+                  Stream.empty,
+                  createStreamWithRetry(
+                    [...messages, { role: "user", content: buildCorrectivePrompt(genError, successfulPatches) }],
+                    validationDoc,
+                    usageRef,
+                    patchesRef,
+                    attempt + 1
+                  )
+                );
+              })
             );
           })
         );
@@ -273,8 +295,9 @@ export class GenerateService extends Effect.Service<GenerateService>()(
             currentHtml ?? ""
           );
 
-          // Create Ref to track usage across retries
+          // Create Refs to track state across retries
           const usageRef = yield* Ref.make<Usage[]>([]);
+          const patchesRef = yield* Ref.make<Patch[]>([]);
           const startTime = yield* DateTime.now;
 
           // Create the streaming pipeline with retry - TRUE STREAMING!
@@ -282,6 +305,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
             messages,
             validationDoc,
             usageRef,
+            patchesRef,
             0
           );
 
@@ -336,7 +360,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
                 outputTokens,
                 totalTokens: aggregatedUsage.totalTokens,
                 cachedTokens,
-                cacheRate: `${cacheRate.toFixed(1)}%`,
+                cacheRate: `${cacheRate.toFixed(2)}%`,
                 tokensPerSecond: `${tokensPerSecond.toFixed(1)} tok/s`,
                 attempts: usages.length,
               });

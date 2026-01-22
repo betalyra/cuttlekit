@@ -135,7 +135,7 @@ const app = {
       statsEl.innerHTML = `
         <span title="Tokens per second">${this.stats.tokensPerSecond} tok/s</span>
         <span class="text-[#a3a3a3]">·</span>
-        <span title="Cache hit rate">${this.stats.cacheRate}% Cache hits</span>
+        <span title="Cache hit rate">${this.stats.cacheRate}% Prompt cache</span>
       `;
       statsEl.style.display = "flex";
     } else {
