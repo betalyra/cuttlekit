@@ -1,5 +1,4 @@
 import { z } from "zod";
-import type { GenerationError } from "./errors.js";
 
 // ============================================================
 // Zod Schemas
@@ -58,39 +57,6 @@ export type Message = {
   readonly content: string;
 };
 
-// Result of a single stream attempt - either success or validation failure with partial results
-export type AttemptResult =
-  | { readonly _tag: "Success"; readonly responses: readonly UnifiedResponse[] }
-  | {
-      readonly _tag: "ValidationFailed";
-      readonly validResponses: readonly UnifiedResponse[];
-      readonly error: GenerationError;
-    };
-
-// Stream item during processing - error as data pattern
-export type StreamItemResponse = {
-  readonly _tag: "Response";
-  readonly response: UnifiedResponse;
-  readonly collected: readonly UnifiedResponse[];
-};
-
-export type StreamItemError = {
-  readonly _tag: "Error";
-  readonly error: GenerationError;
-  readonly collected: readonly UnifiedResponse[];
-};
-
-export type StreamItem = StreamItemResponse | StreamItemError;
-
-// State for retry loop
-export type IterateState = {
-  readonly attempt: number;
-  readonly messages: readonly Message[];
-  readonly allResponses: readonly UnifiedResponse[];
-  readonly done: boolean;
-  readonly lastError?: GenerationError;
-  readonly usagePromises: readonly PromiseLike<unknown>[];
-};
 
 // Usage types for token aggregation
 export type Usage = {
