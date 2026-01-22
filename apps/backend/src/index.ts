@@ -10,7 +10,11 @@ import { createServer } from "node:http";
 
 import { api, healthGroupLive, makeGenerateGroupLive } from "./api.js";
 import { GenerateService } from "./services/generate/index.js";
-import { GoogleService, GroqService } from "@betalyra/generative-ui-common/server";
+import {
+  LanguageModelProvider,
+  GroqLanguageModelLayer,
+  GoogleLanguageModelLayer,
+} from "@betalyra/generative-ui-common/server";
 import { SessionService } from "./services/session.js";
 import { StorageService } from "./services/storage.js";
 import { VdomService, PatchValidator } from "./services/vdom/index.js";
@@ -39,6 +43,7 @@ const StorageLayerLive = Layer.unwrapEffect(
 );
 
 // LLM provider layer based on LLM_PROVIDER env var (groq | google)
+// Dies on config error - no point running without a model
 const LlmLayerLive = Layer.unwrapEffect(
   Effect.gen(function* () {
     const selectedProvider = yield* Config.literal(
@@ -46,16 +51,16 @@ const LlmLayerLive = Layer.unwrapEffect(
       "groq"
     )("LLM_PROVIDER").pipe(Config.withDefault("groq"));
 
+    const modelId = yield* Config.string("LLM_MODEL").pipe(
+      Config.withDefault("openai/gpt-oss-120b")
+    );
+
     if (selectedProvider === "groq") {
-      return GroqService;
-    } else if (selectedProvider === "google") {
-      return GoogleService;
+      return GroqLanguageModelLayer(modelId);
     } else {
-      return yield* Effect.fail(
-        new Error(`Invalid LLM provider: ${selectedProvider}`)
-      );
+      return GoogleLanguageModelLayer(modelId);
     }
-  })
+  }).pipe(Effect.orDie)
 );
 
 // Compose all service layers
