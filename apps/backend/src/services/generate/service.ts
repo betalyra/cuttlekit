@@ -1,5 +1,5 @@
-import { Effect, Stream, pipe, DateTime, Duration, Option, Either } from "effect";
-import { streamText } from "ai";
+import { Effect, Stream, pipe, DateTime, Duration, Ref } from "effect";
+import { streamText, type TextStreamPart, type LanguageModelUsage } from "ai";
 import { LlmProvider } from "@betalyra/generative-ui-common/server";
 import { StorageService } from "../storage.js";
 import { accumulateLinesWithFlush } from "../../stream/utils.js";
@@ -11,9 +11,6 @@ import {
   type UnifiedResponse,
   type UnifiedGenerateOptions,
   type Message,
-  type AttemptResult,
-  type StreamItem,
-  type IterateState,
   type Usage,
   type AggregatedUsage,
   MAX_RETRY_ATTEMPTS,
@@ -21,6 +18,7 @@ import {
   buildCorrectivePrompt,
   safeAsyncIterable,
 } from "./index.js";
+import type { GenerationError } from "./errors.js";
 
 export class GenerateService extends Effect.Service<GenerateService>()(
   "GenerateService",
@@ -68,201 +66,155 @@ export class GenerateService extends Effect.Service<GenerateService>()(
         });
 
       // ============================================================
-      // Run single attempt - streams and validates with error-as-data
+      // Parse and validate a JSON line - fails with GenerationError
       // ============================================================
-      const runAttempt = (
-        messages: readonly Message[],
+      const parseAndValidate = (
+        line: string,
         validationDoc: Document
-      ) =>
+      ): Effect.Effect<UnifiedResponse, GenerationError> =>
         Effect.gen(function* () {
-          const wrappedModel = llm.provider.languageModel("openai/gpt-oss-120b");
+          // Parse JSON (fails with JsonParseError)
+          const response = yield* parseJsonLine(line);
 
-          const result = streamText({
-            model: wrappedModel,
-            messages: messages as Message[],
-            providerOptions: {
-              openai: { streamOptions: { includeUsage: true } },
-            },
-          });
-
-          // Token stream from LLM
-          const tokenStream = Stream.fromAsyncIterable(
-            safeAsyncIterable(result.textStream),
-            (error) =>
-              error instanceof Error
-                ? error
-                : new Error(`Stream error: ${String(error)}`)
-          );
-
-          // Process stream with mapAccumEffect - error as data pattern
-          // State: accumulated valid responses
-          // Output: StreamItem (either Response or Error)
-          const processedStream = pipe(
-            tokenStream,
-            accumulateLinesWithFlush,
-            Stream.tap((line) => Effect.log("Line", { line })),
-            Stream.mapAccumEffect(
-              [] as readonly UnifiedResponse[],
-              (collected, line): Effect.Effect<readonly [readonly UnifiedResponse[], StreamItem], never, never> =>
-                Effect.gen(function* () {
-                  // Parse JSON line - catch errors as data
-                  const parseResult = yield* parseJsonLine(line).pipe(Effect.either);
-
-                  if (Either.isLeft(parseResult)) {
-                    // JSON parsing failed - emit error with collected responses
-                    const item: StreamItem = {
-                      _tag: "Error",
-                      error: parseResult.left,
-                      collected,
-                    };
-                    return [collected, item] as const;
-                  }
-
-                  const response = parseResult.right;
-
-                  // Validate patches
-                  if (response.type === "patches") {
-                    const validationResult = yield* patchValidator
-                      .validateAll(validationDoc, response.patches)
-                      .pipe(Effect.either);
-
-                    if (Either.isLeft(validationResult)) {
-                      // Validation failed - emit error with collected responses
-                      const item: StreamItem = {
-                        _tag: "Error",
-                        error: validationResult.left,
-                        collected,
-                      };
-                      return [collected, item] as const;
-                    }
-                  }
-
-                  // Valid response - accumulate
-                  const newCollected = [...collected, response];
-                  const item: StreamItem = {
-                    _tag: "Response",
-                    response,
-                    collected: newCollected,
-                  };
-                  return [newCollected, item] as const;
-                })
-            ),
-            // Stop at first error
-            Stream.takeUntil((item: StreamItem) => item._tag === "Error")
-          );
-
-          // Run stream and get last item (contains full state)
-          const lastItem = yield* pipe(processedStream, Stream.runLast);
-
-          const attemptResult: AttemptResult = Option.match(lastItem, {
-            onNone: () => ({ _tag: "Success" as const, responses: [] as readonly UnifiedResponse[] }),
-            onSome: (item: StreamItem) =>
-              item._tag === "Error"
-                ? {
-                    _tag: "ValidationFailed" as const,
-                    validResponses: item.collected,
-                    error: item.error,
-                  }
-                : { _tag: "Success" as const, responses: item.collected },
-          });
-
-          return { ...attemptResult, usagePromise: result.usage };
-        });
-
-      // ============================================================
-      // Run with retry - functional retry loop using Effect.iterate
-      // ============================================================
-      const runWithRetry = (
-        initialMessages: readonly Message[],
-        validationDoc: Document
-      ) =>
-        Effect.gen(function* () {
-          const initialState: IterateState = {
-            attempt: 0,
-            messages: initialMessages,
-            allResponses: [],
-            done: false,
-            usagePromises: [],
-          };
-
-          const finalState = yield* Effect.iterate(initialState, {
-            while: (s): s is IterateState => !s.done && s.attempt < MAX_RETRY_ATTEMPTS,
-            body: (state): Effect.Effect<IterateState, Error> =>
-              Effect.gen(function* () {
-                yield* Effect.log("Running generation attempt", {
-                  attempt: state.attempt + 1,
-                  maxAttempts: MAX_RETRY_ATTEMPTS,
-                });
-
-                const result = yield* runAttempt(state.messages, validationDoc);
-
-                if (result._tag === "Success") {
-                  // All patches validated - done!
-                  yield* Effect.log("Attempt succeeded", {
-                    responseCount: result.responses.length,
-                  });
-                  return {
-                    ...state,
-                    allResponses: [...state.allResponses, ...result.responses],
-                    done: true,
-                    usagePromises: [...state.usagePromises, result.usagePromise],
-                  } satisfies IterateState;
-                }
-
-                // Generation failed - prepare retry with corrective prompt
-                const errorDetails =
-                  result.error._tag === "JsonParseError"
-                    ? { type: "json_parse", line: result.error.line.slice(0, 100) }
-                    : { type: "validation", selector: result.error.patch.selector, reason: result.error.reason };
-
-                yield* Effect.log("Generation failed, preparing retry", {
-                  attempt: state.attempt + 1,
-                  error: result.error.message,
-                  ...errorDetails,
-                  validResponsesCollected: result.validResponses.length,
-                });
-
-                const correctiveMessage: Message = {
-                  role: "user",
-                  content: buildCorrectivePrompt(result.error),
-                };
-
-                return {
-                  attempt: state.attempt + 1,
-                  messages: [...state.messages, correctiveMessage],
-                  allResponses: [...state.allResponses, ...result.validResponses],
-                  done: false,
-                  lastError: result.error,
-                  usagePromises: [...state.usagePromises, result.usagePromise],
-                } satisfies IterateState;
-              }),
-          });
-
-          // Check if we exhausted retries without success
-          if (!finalState.done && finalState.lastError) {
-            yield* Effect.log("Max retries exceeded", {
-              attempts: finalState.attempt,
-              lastError: finalState.lastError.message,
-            });
-            return yield* Effect.fail(
-              new Error(
-                `Max retries (${MAX_RETRY_ATTEMPTS}) exceeded. Last error: ${finalState.lastError.message}`
-              )
-            );
+          // Validate patches (fails with PatchValidationError)
+          if (response.type === "patches") {
+            yield* patchValidator.validateAll(validationDoc, response.patches);
           }
 
-          return {
-            responses: finalState.allResponses,
-            usagePromises: finalState.usagePromises,
-          };
+          return response;
         });
+
+      // ============================================================
+      // Convert AI SDK LanguageModelUsage to our Usage type
+      // ============================================================
+      const convertUsage = (sdkUsage: LanguageModelUsage): Usage => ({
+        inputTokens: sdkUsage.inputTokens ?? 0,
+        outputTokens: sdkUsage.outputTokens ?? 0,
+        totalTokens: sdkUsage.totalTokens ?? 0,
+        inputTokenDetails: {
+          cacheReadTokens: sdkUsage.inputTokenDetails?.cacheReadTokens ?? 0,
+        },
+      });
+
+      // ============================================================
+      // Create attempt stream - uses fullStream for usage tracking
+      // ============================================================
+      const createAttemptStream = (
+        messages: readonly Message[],
+        validationDoc: Document,
+        usageRef: Ref.Ref<Usage[]>
+      ): Stream.Stream<UnifiedResponse, GenerationError | Error> =>
+        Stream.unwrap(
+          Effect.gen(function* () {
+            const wrappedModel = llm.provider.languageModel("openai/gpt-oss-120b");
+
+            const result = streamText({
+              model: wrappedModel,
+              messages: messages as Message[],
+              providerOptions: {
+                openai: { streamOptions: { includeUsage: true } },
+              },
+            });
+
+            // Use fullStream to get both text AND usage events
+            const fullStream = Stream.fromAsyncIterable(
+              safeAsyncIterable(result.fullStream),
+              (error) =>
+                error instanceof Error
+                  ? error
+                  : new Error(`Stream error: ${String(error)}`)
+            );
+
+            return pipe(
+              fullStream,
+              // Extract text from text-delta, track usage from finish
+              Stream.mapEffect((part) =>
+                Effect.gen(function* () {
+                  const p = part as TextStreamPart<Record<string, never>>;
+                  if (p.type === "finish" && p.totalUsage) {
+                    // Track usage when we see the finish event
+                    yield* Ref.update(usageRef, (usages) => [
+                      ...usages,
+                      convertUsage(p.totalUsage),
+                    ]);
+                    return null; // Don't emit finish event as text
+                  }
+                  if (p.type === "text-delta") {
+                    return p.text;
+                  }
+                  return null; // Ignore other event types
+                })
+              ),
+              // Filter out nulls (non-text events)
+              Stream.filter((text): text is string => text !== null),
+              // Accumulate text into lines
+              accumulateLinesWithFlush,
+              Stream.tap((line) => Effect.log("Line", { line })),
+              // Parse and validate each line
+              Stream.mapEffect((line) => parseAndValidate(line, validationDoc))
+            );
+          })
+        );
+
+      // ============================================================
+      // Create stream with retry - uses catchAll for seamless recovery
+      // ============================================================
+      const createStreamWithRetry = (
+        messages: readonly Message[],
+        validationDoc: Document,
+        usageRef: Ref.Ref<Usage[]>,
+        attempt: number
+      ): Stream.Stream<UnifiedResponse, Error> => {
+        if (attempt >= MAX_RETRY_ATTEMPTS) {
+          return Stream.fail(
+            new Error(`Max retries (${MAX_RETRY_ATTEMPTS}) exceeded`)
+          );
+        }
+
+        return pipe(
+          createAttemptStream(messages, validationDoc, usageRef),
+
+          // Log successful emissions
+          Stream.tap((response) =>
+            Effect.log(`[Attempt ${attempt}] Emitting response`, {
+              type: response.type,
+            })
+          ),
+
+          // THE KEY: catchAll intercepts errors and retries on GenerationError
+          Stream.catchAll((error: GenerationError | Error) => {
+            // Only retry on GenerationError (tagged errors with _tag)
+            if (!("_tag" in error)) {
+              return Stream.fail(error);
+            }
+
+            const genError = error as GenerationError;
+            return pipe(
+              Stream.fromEffect(
+                Effect.log(`[Attempt ${attempt}] ${genError._tag}, retrying...`, {
+                  error: genError.message,
+                })
+              ),
+              Stream.drain,
+              Stream.concat(
+                createStreamWithRetry(
+                  [...messages, { role: "user", content: buildCorrectivePrompt(genError) }],
+                  validationDoc,
+                  usageRef,
+                  attempt + 1
+                )
+              )
+            );
+          })
+        );
+      };
 
       // ============================================================
       // Main entry point - streamUnified
       // ============================================================
       const streamUnified = (
         options: UnifiedGenerateOptions
-      ): Effect.Effect<Stream.Stream<UnifiedResponse, never>, Error> =>
+      ): Effect.Effect<Stream.Stream<UnifiedResponse, Error>, never> =>
         Effect.gen(function* () {
           yield* Effect.log("Streaming unified response", {
             action: options.action,
@@ -321,25 +273,19 @@ export class GenerateService extends Effect.Service<GenerateService>()(
             currentHtml ?? ""
           );
 
+          // Create Ref to track usage across retries
+          const usageRef = yield* Ref.make<Usage[]>([]);
           const startTime = yield* DateTime.now;
 
-          // Run generation with retry
-          const { responses, usagePromises } = yield* runWithRetry(
+          // Create the streaming pipeline with retry - TRUE STREAMING!
+          const contentStream = createStreamWithRetry(
             messages,
-            validationDoc
+            validationDoc,
+            usageRef,
+            0
           );
 
-          // Content stream from collected responses
-          const contentStream = pipe(
-            Stream.fromIterable(responses),
-            Stream.tap((response) =>
-              Effect.logDebug("Emitting response", {
-                response: JSON.stringify(response),
-              })
-            )
-          );
-
-          // Stats stream - aggregates usage from all attempts
+          // Stats stream runs AFTER content stream completes
           const statsStream = Stream.fromEffect(
             Effect.gen(function* () {
               const endTime = yield* DateTime.now;
@@ -347,19 +293,10 @@ export class GenerateService extends Effect.Service<GenerateService>()(
               const elapsedMs = Duration.toMillis(elapsed);
               const elapsedSeconds = elapsedMs / 1000;
 
-              // Aggregate usage from all attempts
-              const usages = yield* Effect.promise(() =>
-                Promise.all(usagePromises)
-              );
+              // Get accumulated usage from Ref
+              const usages = yield* Ref.get(usageRef);
 
-              const initialUsage: AggregatedUsage = {
-                inputTokens: 0,
-                outputTokens: 0,
-                totalTokens: 0,
-                cachedTokens: 0,
-              };
-
-              const aggregatedUsage = (usages as Usage[]).reduce<AggregatedUsage>(
+              const aggregatedUsage = usages.reduce<AggregatedUsage>(
                 (acc, usage) => ({
                   inputTokens: acc.inputTokens + (usage.inputTokens ?? 0),
                   outputTokens: acc.outputTokens + (usage.outputTokens ?? 0),
@@ -368,7 +305,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
                     acc.cachedTokens +
                     (usage.inputTokenDetails?.cacheReadTokens ?? 0),
                 }),
-                initialUsage
+                { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 }
               );
 
               yield* Effect.log("Usage", {
