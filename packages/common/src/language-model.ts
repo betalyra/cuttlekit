@@ -1,12 +1,44 @@
-import { createGoogleGenerativeAI } from "@ai-sdk/google";
-import { createGroq } from "@ai-sdk/groq";
-import { Config, Context, Effect, Layer, Redacted } from "effect";
+import { Context, Layer } from "effect";
 import type { LanguageModel } from "ai";
 import type { ProviderOptions } from "@ai-sdk/provider-utils";
+
+// ============================================================
+// Usage Extraction Types
+// ============================================================
+
+export type ExtractedUsage = {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly totalTokens: number;
+  readonly cachedTokens: number;
+};
+
+export type UsageExtractor = (rawUsage: unknown) => ExtractedUsage;
+
+// Default extractor - no caching info
+export const extractDefaultUsage: UsageExtractor = (raw) => {
+  const usage = raw as {
+    inputTokens?: number;
+    outputTokens?: number;
+    totalTokens?: number;
+  };
+  return {
+    inputTokens: usage.inputTokens ?? 0,
+    outputTokens: usage.outputTokens ?? 0,
+    totalTokens: usage.totalTokens ?? 0,
+    cachedTokens: 0,
+  };
+};
+
+// ============================================================
+// Language Model Config
+// ============================================================
 
 export type LanguageModelConfig = {
   readonly model: LanguageModel;
   readonly providerOptions: ProviderOptions;
+  readonly extractUsage: UsageExtractor;
+  readonly providerName: string;
 };
 
 export class LanguageModelProvider extends Context.Tag("LanguageModelProvider")<
@@ -14,38 +46,14 @@ export class LanguageModelProvider extends Context.Tag("LanguageModelProvider")<
   LanguageModelConfig
 >() {}
 
-export const GroqLanguageModelLayer = (modelId: string) =>
-  Layer.effect(
-    LanguageModelProvider,
-    Effect.gen(function* () {
-      const apiKey = yield* Config.redacted("GROQ_API_KEY");
-      const groq = createGroq({ apiKey: Redacted.value(apiKey) });
-      return {
-        model: groq(modelId),
-        providerOptions: {
-          openai: { streamOptions: { includeUsage: true } },
-        },
-      };
-    })
-  ).pipe(Layer.orDie);
-
-export const GoogleLanguageModelLayer = (modelId: string) =>
-  Layer.effect(
-    LanguageModelProvider,
-    Effect.gen(function* () {
-      const apiKey = yield* Config.redacted("GOOGLE_API_KEY");
-      const google = createGoogleGenerativeAI({
-        apiKey: Redacted.value(apiKey),
-      });
-      return {
-        model: google(modelId),
-        providerOptions: {},
-      };
-    })
-  ).pipe(Layer.orDie);
+// ============================================================
+// Test Layer
+// ============================================================
 
 export const TestLanguageModelLayer = (model: LanguageModel) =>
   Layer.succeed(LanguageModelProvider, {
     model,
     providerOptions: {},
+    extractUsage: extractDefaultUsage,
+    providerName: "test",
   });

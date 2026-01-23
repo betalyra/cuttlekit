@@ -6,6 +6,9 @@ export default defineConfig({
     server: "src/server.ts",
     client: "src/client.ts",
   },
+  dts: {
+    sourcemap: true,
+  },
   // Don't bundle effect types - let consumers use their own effect dependency
   // Prevents nominal type mismatch (LayerTypeId, EffectTypeId symbols differ when bundled)
   external: ["effect", /^@effect\//],
