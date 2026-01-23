@@ -1,6 +1,21 @@
 import { Schema } from "effect";
 
+// ============================================================
+// Memory Types
+// ============================================================
+
+export const UserPrompt = Schema.String;
+export type UserPrompt = typeof UserPrompt.Type;
+
+export const UserAction = Schema.Struct({
+  action: Schema.String,
+  data: Schema.optional(Schema.Unknown),
+});
+export type UserAction = typeof UserAction.Type;
+
+// ============================================================
 // Request Types
+// ============================================================
 export const GenerateRequest = Schema.Struct({
   type: Schema.Literal("generate"),
   prompt: Schema.optional(Schema.String),

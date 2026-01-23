@@ -1,7 +1,7 @@
 import { Effect, Stream, pipe, DateTime, Duration, Ref } from "effect";
 import { streamText } from "ai";
 import { LanguageModelProvider } from "@betalyra/generative-ui-common/server";
-import { StorageService } from "../storage.js";
+import { MemoryService, type MemorySearchResult } from "../memory/index.js";
 import { accumulateLinesWithFlush } from "../../stream/utils.js";
 import { PatchValidator, type Patch } from "../vdom/index.js";
 import {
@@ -27,7 +27,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
     effect: Effect.gen(function* () {
       const { model, providerOptions, extractUsage, providerName } =
         yield* LanguageModelProvider;
-      const storage = yield* StorageService;
+      const memory = yield* MemoryService;
       const patchValidator = yield* PatchValidator;
 
       // ============================================================
@@ -71,7 +71,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
       // ============================================================
       const parseAndValidate = (
         line: string,
-        validationDoc: Document
+        validationDoc: Document,
       ): Effect.Effect<UnifiedResponse, GenerationError> =>
         Effect.gen(function* () {
           // Parse JSON (fails with JsonParseError)
@@ -91,7 +91,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
       const createAttemptStream = (
         messages: readonly Message[],
         validationDoc: Document,
-        usageRef: Ref.Ref<Usage[]>
+        usageRef: Ref.Ref<Usage[]>,
       ): Stream.Stream<UnifiedResponse, GenerationError | Error> =>
         Stream.unwrap(
           Effect.gen(function* () {
@@ -107,7 +107,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
               (error) =>
                 error instanceof Error
                   ? error
-                  : new Error(`Stream error: ${String(error)}`)
+                  : new Error(`Stream error: ${String(error)}`),
             );
 
             return pipe(
@@ -146,7 +146,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
                   }
 
                   return null; // Ignore other event types
-                })
+                }),
               ),
               // Filter out nulls (non-text events)
               Stream.filter((text): text is string => text !== null),
@@ -154,9 +154,9 @@ export class GenerateService extends Effect.Service<GenerateService>()(
               accumulateLinesWithFlush,
               Stream.tap((line) => Effect.log("Line", { line })),
               // Parse and validate each line
-              Stream.mapEffect((line) => parseAndValidate(line, validationDoc))
+              Stream.mapEffect((line) => parseAndValidate(line, validationDoc)),
             );
-          })
+          }),
         );
 
       // ============================================================
@@ -167,11 +167,11 @@ export class GenerateService extends Effect.Service<GenerateService>()(
         validationDoc: Document,
         usageRef: Ref.Ref<Usage[]>,
         patchesRef: Ref.Ref<Patch[]>,
-        attempt: number
+        attempt: number,
       ): Stream.Stream<UnifiedResponse, Error> => {
         if (attempt >= MAX_RETRY_ATTEMPTS) {
           return Stream.fail(
-            new Error(`Max retries (${MAX_RETRY_ATTEMPTS}) exceeded`)
+            new Error(`Max retries (${MAX_RETRY_ATTEMPTS}) exceeded`),
           );
         }
 
@@ -182,12 +182,15 @@ export class GenerateService extends Effect.Service<GenerateService>()(
           Stream.tap((response) =>
             Effect.gen(function* () {
               if (response.type === "patches") {
-                yield* Ref.update(patchesRef, (ps) => [...ps, ...response.patches]);
+                yield* Ref.update(patchesRef, (ps) => [
+                  ...ps,
+                  ...response.patches,
+                ]);
               }
               yield* Effect.log(`[Attempt ${attempt}] Emitting response`, {
                 type: response.type,
               });
-            })
+            }),
           ),
 
           // THE KEY: catchAll intercepts errors and retries on GenerationError
@@ -202,33 +205,43 @@ export class GenerateService extends Effect.Service<GenerateService>()(
               Effect.gen(function* () {
                 const successfulPatches = yield* Ref.get(patchesRef);
                 yield* Ref.set(patchesRef, []); // Reset for next attempt
-                yield* Effect.log(`[Attempt ${attempt}] ${genError._tag}, retrying...`, {
-                  error: genError.message,
-                  successfulPatches: successfulPatches.length,
-                });
+                yield* Effect.log(
+                  `[Attempt ${attempt}] ${genError._tag}, retrying...`,
+                  {
+                    error: genError.message,
+                    successfulPatches: successfulPatches.length,
+                  },
+                );
 
                 return Stream.concat(
                   Stream.empty,
                   createStreamWithRetry(
-                    [...messages, { role: "user", content: buildCorrectivePrompt(genError, successfulPatches) }],
+                    [
+                      ...messages,
+                      {
+                        role: "user",
+                        content: buildCorrectivePrompt(
+                          genError,
+                          successfulPatches,
+                        ),
+                      },
+                    ],
                     validationDoc,
                     usageRef,
                     patchesRef,
-                    attempt + 1
-                  )
+                    attempt + 1,
+                  ),
                 );
-              })
+              }),
             );
-          })
+          }),
         );
       };
 
       // ============================================================
       // Main entry point - streamUnified
       // ============================================================
-      const streamUnified = (
-        options: UnifiedGenerateOptions
-      ): Effect.Effect<Stream.Stream<UnifiedResponse, Error>, never> =>
+      const streamUnified = (options: UnifiedGenerateOptions) =>
         Effect.gen(function* () {
           yield* Effect.log("Streaming unified response", {
             provider: providerName,
@@ -237,28 +250,56 @@ export class GenerateService extends Effect.Service<GenerateService>()(
             hasCurrentHtml: !!options.currentHtml,
           });
 
-          const { sessionId, currentHtml, prompt, action, actionData } = options;
+          const { sessionId, currentHtml, prompt, action, actionData } =
+            options;
 
-          // Fetch prompts and actions separately for optimal caching
-          const [recentPrompts, recentActions] = yield* Effect.all([
-            storage
-              .getRecentPrompts(sessionId, 3)
-              .pipe(Effect.catchAll(() => Effect.succeed([] as const))),
-            storage
-              .getRecentActions(sessionId, 5)
-              .pipe(Effect.catchAll(() => Effect.succeed([] as const))),
+          // Build semantic context from memory
+          const searchQuery = prompt || `user action: ${action}`;
+
+          // Fetch recent entries and semantic search results
+          const [recentEntries, relevantEntries] = yield* Effect.all([
+            memory
+              .getRecent(sessionId, 5)
+              .pipe(
+                Effect.catchAll(() =>
+                  Effect.succeed([] as MemorySearchResult[]),
+                ),
+              ),
+            memory
+              .search(sessionId, searchQuery, 8)
+              .pipe(
+                Effect.catchAll(() =>
+                  Effect.succeed([] as MemorySearchResult[]),
+                ),
+              ),
           ]);
+
+          // Filter out recent from relevant to avoid duplicates
+          const recentIds = new Set(recentEntries.map((e) => e.id));
+          const uniqueRelevant = relevantEntries
+            .filter((e) => !recentIds.has(e.id))
+            .slice(0, 3);
 
           // Build history (context only, not to act on)
           const historyParts: string[] = [];
-          if (recentPrompts.length > 0) {
+          if (recentEntries.length > 0) {
             historyParts.push(
-              `[HISTORY] Prompts: ${recentPrompts.map((p) => p.content).join("; ")}`
+              `[RECENT CHANGES]\n${recentEntries
+                .map(
+                  (e, i) =>
+                    `${i + 1}. ${e.promptSummary ? `"${e.promptSummary}" → ` : ""}${e.changeSummary}`,
+                )
+                .join("\n")}`,
             );
           }
-          if (recentActions.length > 0) {
+          if (uniqueRelevant.length > 0) {
             historyParts.push(
-              `[HISTORY] Actions: ${recentActions.map((a) => a.action).join(", ")}`
+              `[RELEVANT PAST CONTEXT]\n${uniqueRelevant
+                .map(
+                  (e) =>
+                    `- ${e.promptSummary ? `"${e.promptSummary}" → ` : ""}${e.changeSummary}`,
+                )
+                .join("\n")}`,
             );
           }
 
@@ -269,7 +310,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
           }
           if (action) {
             currentParts.push(
-              `[NOW] Action: ${action} Data: ${JSON.stringify(actionData, null, 0)}`
+              `[NOW] Action: ${action} Data: ${JSON.stringify(actionData, null, 0)}`,
             );
           } else if (prompt) {
             currentParts.push(`[NOW] Prompt: ${prompt}`);
@@ -285,7 +326,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
 
           // Create validation document from current HTML (or empty)
           const validationDoc = yield* patchValidator.createValidationDocument(
-            currentHtml ?? ""
+            currentHtml ?? "",
           );
 
           // Create Refs to track state across retries
@@ -299,7 +340,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
             validationDoc,
             usageRef,
             patchesRef,
-            0
+            0,
           );
 
           // Stats stream runs AFTER content stream completes
@@ -322,7 +363,12 @@ export class GenerateService extends Effect.Service<GenerateService>()(
                     acc.cachedTokens +
                     (usage.inputTokenDetails?.cacheReadTokens ?? 0),
                 }),
-                { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 }
+                {
+                  inputTokens: 0,
+                  outputTokens: 0,
+                  totalTokens: 0,
+                  cachedTokens: 0,
+                },
               );
 
               yield* Effect.log("Usage", {
@@ -330,23 +376,14 @@ export class GenerateService extends Effect.Service<GenerateService>()(
                 attempts: usages.length,
               });
 
-              const { inputTokens, outputTokens, cachedTokens } = aggregatedUsage;
+              const { inputTokens, outputTokens, cachedTokens } =
+                aggregatedUsage;
               const cacheRate =
                 inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0;
               const tokensPerSecond =
                 elapsedSeconds > 0 ? outputTokens / elapsedSeconds : 0;
 
-              // Store prompt and action separately for optimal caching
-              if (prompt) {
-                yield* storage
-                  .addPrompt(sessionId, prompt)
-                  .pipe(Effect.catchAll(() => Effect.void));
-              }
-              if (action) {
-                yield* storage
-                  .addAction(sessionId, action, actionData)
-                  .pipe(Effect.catchAll(() => Effect.void));
-              }
+              // Note: Memory saving is now handled by UIService after stream completes
 
               yield* Effect.log("Stream completed - Token usage", {
                 inputTokens,
@@ -363,7 +400,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
                 cacheRate: Math.round(cacheRate),
                 tokensPerSecond: Math.round(tokensPerSecond),
               };
-            })
+            }),
           );
 
           return pipe(contentStream, Stream.concat(statsStream));
@@ -371,5 +408,5 @@ export class GenerateService extends Effect.Service<GenerateService>()(
 
       return { streamUnified };
     }),
-  }
+  },
 ) {}

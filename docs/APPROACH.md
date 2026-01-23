@@ -418,6 +418,39 @@ const UnifiedResponseSchema = z.union([
 
 ---
 
+## Step 22: Semantic Memory with Vector Search
+
+**Problem:** The system has no long-term memory. Users can't ask "what did I build last week?" or have the AI recall context from previous sessions.
+
+**Solution:** SQLite-based memory system with LLM-generated summaries and vector embeddings for semantic search.
+
+**Architecture:**
+- `Database` - libSQL/Turso with Drizzle ORM, runs migrations on startup
+- `StoreService` - Low-level CRUD for sessions and memory entries
+- `MemoryService` - Background queue for async processing, summarization, embedding
+- `SessionService` - Session lifecycle management
+
+**How memory is saved:**
+1. After each UI generation, a `MemoryOperation` is enqueued (non-blocking)
+2. Background processor generates summaries via LLM (prompts, actions, changes)
+3. Summaries are embedded using embedding model
+4. Entry stored with: raw data, summaries, embedding, timestamps
+
+**Key design decisions:**
+- **Discriminated union for changes** - `MemoryChange = { type: "patches", patches } | { type: "full", html }` elegantly handles both update types
+- **Zod over Effect Schema** - AI SDK's `Output.object()` works with Zod but not Effect Schema at runtime
+- **Effect.fromNullable** - Clean effect failure when LLM returns no output
+- **Background queue** - Memory processing doesn't block UI responses
+
+**Vector search:**
+- Uses libSQL's `vector_distance_cos` and `vector_top_k` for ANN search
+- Searches within session scope for relevant past interactions
+- Returns entries ranked by semantic similarity
+
+**Result:** Sessions persist across restarts. Future: semantic search for "remember when I..." queries.
+
+---
+
 ## Key Takeaways
 
 1. **Plain HTML over JSX** - AI can steer a responsive frontend by generating plain HTML
@@ -428,3 +461,4 @@ const UnifiedResponseSchema = z.union([
 6. **Graceful degradation** - Patch failures automatically fall back to full regeneration
 7. **Separate prompt/action history** - Maximizes cache hits by keeping prompts as stable prefix
 8. **Fail-fast with corrective retry** - Validate patches during streaming, retry with error context if invalid
+9. **Background queues for expensive operations** - Memory summarization and embedding runs async, doesn't block UI

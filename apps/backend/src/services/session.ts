@@ -1,20 +1,61 @@
-import { DateTime, Effect, Random } from "effect";
+import { DateTime, Effect } from "effect";
+import { StoreService } from "./memory/index.js";
+
+const DEFAULT_USER_ID = "default-user";
 
 export class SessionService extends Effect.Service<SessionService>()(
   "SessionService",
   {
     accessors: true,
     effect: Effect.gen(function* () {
-      const generateSessionId = () =>
+      const store = yield* StoreService;
+
+      const createSession = (userId: string = DEFAULT_USER_ID) =>
         Effect.gen(function* () {
           const now = yield* DateTime.now;
           const timestamp = DateTime.toEpochMillis(now);
-          const random = yield* Random.nextIntBetween(0, 2147483647);
-          const randomStr = random.toString(36).substring(0, 7);
-          return `session-${timestamp}-${randomStr}`;
+
+          // Store handles ID generation via cuid2, returns the new session
+          const session = yield* store.insertSession({
+            userId,
+            createdAt: timestamp,
+            lastAccessedAt: timestamp,
+          });
+
+          return session;
         });
 
-      return { generateSessionId };
+      const getSession = (sessionId: string) => store.getSession(sessionId);
+
+      const getOrCreateSession = (sessionId?: string, userId?: string) =>
+        Effect.gen(function* () {
+          if (sessionId) {
+            const session = yield* getSession(sessionId);
+            if (session) {
+              yield* store.updateSessionLastAccessed(sessionId);
+              return session;
+            }
+          }
+          return yield* createSession(userId);
+        });
+
+      const listSessions = (userId: string = DEFAULT_USER_ID) =>
+        store.listSessionsByUser(userId);
+
+      const renameSession = (sessionId: string, name: string) =>
+        store.updateSessionName(sessionId, name);
+
+      const deleteSession = (sessionId: string) =>
+        store.deleteSession(sessionId);
+
+      return {
+        createSession,
+        getSession,
+        getOrCreateSession,
+        listSessions,
+        renameSession,
+        deleteSession,
+      };
     }),
   }
 ) {}
