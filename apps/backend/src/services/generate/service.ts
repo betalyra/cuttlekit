@@ -25,7 +25,8 @@ export class GenerateService extends Effect.Service<GenerateService>()(
   {
     accessors: true,
     effect: Effect.gen(function* () {
-      const { model, providerOptions } = yield* LanguageModelProvider;
+      const { model, providerOptions, extractUsage, providerName } =
+        yield* LanguageModelProvider;
       const storage = yield* StorageService;
       const patchValidator = yield* PatchValidator;
 
@@ -117,28 +118,19 @@ export class GenerateService extends Effect.Service<GenerateService>()(
                   // Cast to access raw data - AI SDK types are incomplete
                   const raw = part as Record<string, unknown>;
 
-                  // Capture usage from finish-step (has raw provider data with cached_tokens)
+                  // Capture usage from finish-step using provider-specific extractor
                   if (raw.type === "finish-step") {
-                    const usage = raw.usage as {
-                      inputTokens?: number;
-                      outputTokens?: number;
-                      totalTokens?: number;
-                      raw?: {
-                        prompt_tokens_details?: { cached_tokens?: number };
-                      };
-                    } | undefined;
-
-                    if (usage) {
-                      const cachedTokens =
-                        usage.raw?.prompt_tokens_details?.cached_tokens ?? 0;
-
+                    if (raw.usage) {
+                      const extracted = extractUsage(raw.usage);
                       yield* Ref.update(usageRef, (usages) => [
                         ...usages,
                         {
-                          inputTokens: usage.inputTokens ?? 0,
-                          outputTokens: usage.outputTokens ?? 0,
-                          totalTokens: usage.totalTokens ?? 0,
-                          inputTokenDetails: { cacheReadTokens: cachedTokens },
+                          inputTokens: extracted.inputTokens,
+                          outputTokens: extracted.outputTokens,
+                          totalTokens: extracted.totalTokens,
+                          inputTokenDetails: {
+                            cacheReadTokens: extracted.cachedTokens,
+                          },
                         },
                       ]);
                     }
@@ -239,6 +231,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
       ): Effect.Effect<Stream.Stream<UnifiedResponse, Error>, never> =>
         Effect.gen(function* () {
           yield* Effect.log("Streaming unified response", {
+            provider: providerName,
             action: options.action,
             prompt: options.prompt,
             hasCurrentHtml: !!options.currentHtml,
