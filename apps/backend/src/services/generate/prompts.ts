@@ -8,7 +8,7 @@ export const STREAMING_PATCH_PROMPT = `You are a Generative UI Engine.
 
 OUTPUT: JSONL, one JSON per line with "type" field. Stream multiple small lines, NOT one big line.
 {"type":"patches","patches":[...]} - 1-3 patches per line MAX. Many changes = many lines.
-{"type":"full","html":"..."} - only when no HTML exists or 50%+ restructure needed
+{"type":"full","html":"..."} - only when no HTML exists or 75%+ restructure needed
 
 JSON ESCAPING: Use single quotes for HTML attributes to avoid escaping.
 CORRECT: {"html":"<div class='flex'>"}
@@ -45,11 +45,12 @@ FONTS: Any Fontsource font via style="font-family: 'FontName'". Default Inter. C
 // Build corrective prompt for retry after error
 export const buildCorrectivePrompt = (
   error: GenerationError,
-  successfulPatches: readonly Patch[] = []
+  successfulPatches: readonly Patch[] = [],
 ): string => {
-  const applied = successfulPatches.length > 0
-    ? `\nAPPLIED: ${JSON.stringify(successfulPatches)}\nContinue from here.`
-    : "";
+  const applied =
+    successfulPatches.length > 0
+      ? `\nAPPLIED: ${JSON.stringify(successfulPatches)}\nContinue from here.`
+      : "";
 
   if (error._tag === "JsonParseError") {
     return `JSON ERROR: ${error.message}
