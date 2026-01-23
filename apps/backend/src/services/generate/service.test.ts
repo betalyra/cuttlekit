@@ -5,7 +5,7 @@ import { simulateReadableStream } from "ai";
 import { GenerateService } from "./service.js";
 import { TestLanguageModelLayer } from "@betalyra/generative-ui-common/server";
 import { PatchValidator } from "../vdom/index.js";
-import { StorageService } from "../storage.js";
+import { MemoryService } from "../memory/index.js";
 
 const createMockModel = (chunks: string[]) =>
   new MockLanguageModelV3({
@@ -44,17 +44,18 @@ const createMockModel = (chunks: string[]) =>
     }),
   });
 
-const MockStorageLayer = Layer.succeed(StorageService, {
-  getRecentPrompts: () => Effect.succeed([]),
-  getRecentActions: () => Effect.succeed([]),
-  addPrompt: () => Effect.void,
-  addAction: () => Effect.void,
-} as unknown as StorageService);
+const MockMemoryLayer = Layer.succeed(MemoryService, {
+  getRecent: () => Effect.succeed([]),
+  search: () => Effect.succeed([]),
+  saveMemory: () => Effect.void,
+  describePatch: () => "",
+  describePatches: () => "",
+} as unknown as MemoryService);
 
 const createTestLayer = (mockModel: ReturnType<typeof createMockModel>) =>
   GenerateService.Default.pipe(
     Layer.provide(TestLanguageModelLayer(mockModel)),
-    Layer.provide(MockStorageLayer),
+    Layer.provide(MockMemoryLayer),
     Layer.provide(PatchValidator.Default)
   );
 

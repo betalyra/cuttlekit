@@ -1,51 +1,24 @@
-import {
-  HttpApiBuilder,
-  HttpMiddleware,
-  HttpServer,
-  KeyValueStore,
-} from "@effect/platform";
-import {
-  NodeHttpServer,
-  NodeRuntime,
-  NodeFileSystem,
-  NodePath,
-} from "@effect/platform-node";
+import { HttpApiBuilder, HttpMiddleware, HttpServer } from "@effect/platform";
+import { NodeHttpServer, NodeRuntime } from "@effect/platform-node";
 import { Config, Effect, Layer, Logger, LogLevel } from "effect";
 import { createServer } from "node:http";
 
 import { api, healthGroupLive, makeGenerateGroupLive } from "./api.js";
 import { GenerateService } from "./services/generate/index.js";
 import {
-  LanguageModelProvider,
   GroqLanguageModelLayer,
   GoogleLanguageModelLayer,
+  GoogleEmbeddingModelLayer,
 } from "@betalyra/generative-ui-common/server";
 import { SessionService } from "./services/session.js";
-import { StorageService } from "./services/storage.js";
+import {
+  DatabaseLayer,
+  StoreService,
+  MemoryService,
+} from "./services/memory/index.js";
 import { VdomService, PatchValidator } from "./services/vdom/index.js";
 import { UIService } from "./services/ui.js";
 import { RequestHandlerService } from "./services/request-handler.js";
-
-// Storage layer based on STORAGE env var (memory | file)
-const StorageLayerLive = Layer.unwrapEffect(
-  Effect.gen(function* () {
-    const storageType = yield* Config.literal(
-      "memory",
-      "file",
-    )("STORAGE").pipe(Config.withDefault("memory"));
-
-    if (storageType === "file") {
-      yield* Effect.logInfo("Using file-based storage at ./.data");
-      return KeyValueStore.layerFileSystem("./.data").pipe(
-        Layer.provide(NodeFileSystem.layer),
-        Layer.provide(NodePath.layer),
-      );
-    } else {
-      yield* Effect.logInfo("Using in-memory storage");
-      return KeyValueStore.layerMemory;
-    }
-  }),
-);
 
 // LLM provider layer based on LLM_PROVIDER env var (groq | google)
 // Dies on config error - no point running without a model
@@ -69,22 +42,37 @@ const LlmLayerLive = Layer.unwrapEffect(
   }).pipe(Effect.orDie),
 );
 
+// Embedding model layer (Google text-embedding-004)
+const EmbeddingLayerLive = GoogleEmbeddingModelLayer();
+
 // Compose all service layers
 // Build from dependencies up: base infra → services → handlers
-const StorageWithKV = StorageService.Default.pipe(
-  Layer.provide(StorageLayerLive),
+
+// Database and store
+const StoreWithDb = StoreService.Default.pipe(Layer.provide(DatabaseLayer));
+
+// Memory service with store and embedding
+const MemoryWithDeps = MemoryService.Default.pipe(
+  Layer.provide(StoreWithDb),
+  Layer.provide(EmbeddingLayerLive),
+  Layer.provide(LlmLayerLive),
 );
 
+// Session service depends on store
+const SessionWithDeps = SessionService.Default.pipe(Layer.provide(StoreWithDb));
+
+// Generate service depends on memory and LLM
 const GenerateWithDeps = GenerateService.Default.pipe(
-  Layer.provide(StorageWithKV),
+  Layer.provide(MemoryWithDeps),
   Layer.provide(LlmLayerLive),
   Layer.provide(PatchValidator.Default),
 );
 
+// UI service depends on generate, memory, session, vdom
 const UIWithDeps = UIService.Default.pipe(
   Layer.provide(GenerateWithDeps),
-  Layer.provide(StorageWithKV),
-  Layer.provide(SessionService.Default),
+  Layer.provide(MemoryWithDeps),
+  Layer.provide(SessionWithDeps),
   Layer.provide(VdomService.Default),
 );
 
@@ -107,5 +95,5 @@ const HttpLive = HttpApiBuilder.serve(HttpMiddleware.logger).pipe(
   Layer.provide(Logger.minimumLogLevel(LogLevel.Debug)),
 );
 
-// Launch
-Layer.launch(HttpLive).pipe(NodeRuntime.runMain);
+// Launch (scoped for MemoryService's background queue)
+Layer.launch(HttpLive).pipe(Effect.scoped, NodeRuntime.runMain);

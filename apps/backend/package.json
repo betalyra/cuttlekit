@@ -6,9 +6,18 @@
     "scripts": {
         "dev": "tsx watch src/index.ts",
         "build": "tsdown",
-        "test": "vitest"
+        "test": "vitest",
+        "db:generate": "drizzle-kit generate",
+        "db:migrate": "drizzle-kit migrate",
+        "db:push": "drizzle-kit push",
+        "db:studio": "drizzle-kit studio"
     },
     "dependencies": {
-        "@betalyra/generative-ui-common": "workspace:*"
+        "@betalyra/generative-ui-common": "workspace:*",
+        "@libsql/client": "^0.17.0",
+        "drizzle-orm": "^0.45.1"
+    },
+    "devDependencies": {
+        "drizzle-kit": "^0.31.8"
     }
 }
