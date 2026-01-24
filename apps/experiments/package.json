@@ -8,7 +8,8 @@
         "sandbox": "tsx src/sandbox.ts",
         "agent": "tsx src/agent.ts",
         "vector-search": "tsx src/vector-search.ts",
-        "build": "tsdown"
+        "build": "tsdown",
+        "typecheck": "tsc --noEmit"
     },
     "dependencies": {
         "@betalyra/generative-ui-common": "workspace:*",

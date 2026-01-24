@@ -57,8 +57,6 @@ const MemorySummariesSchema = z.object({
     ),
 });
 
-type MemorySummaries = z.infer<typeof MemorySummariesSchema>;
-
 // ============================================================
 // Patch Description
 // ============================================================

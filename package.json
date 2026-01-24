@@ -17,6 +17,10 @@
     "build:common": "pnpm --filter @betalyra/generative-ui-common build",
     "preview:common": "pnpm --filter @betalyra/generative-ui-common preview",
     "dev:vdom-demo": "tsx scripts/vdom-demo.ts",
+    "typecheck": "pnpm -r typecheck",
+    "typecheck:webpage": "pnpm --filter @betalyra/generative-ui-webpage typecheck",
+    "typecheck:backend": "pnpm --filter @betalyra/generative-ui-backend typecheck",
+    "typecheck:common": "pnpm --filter @betalyra/generative-ui-common typecheck",
     "bench": "tsx scripts/bench.ts"
   },
   "devDependencies": {
