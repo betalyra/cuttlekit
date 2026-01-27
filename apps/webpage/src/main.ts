@@ -25,11 +25,12 @@ type StreamEvent =
   | { type: "session"; sessionId: string }
   | { type: "patch"; patch: Patch }
   | { type: "html"; html: string }
-  | { type: "stats"; cacheRate: number; tokensPerSecond: number; mode: "patches" | "full" }
+  | { type: "stats"; cacheRate: number; tokensPerSecond: number }
   | { type: "done"; html: string };
 
 // Initial intro HTML - sent as currentHtml on first request
-const INITIAL_HTML = `<div class="flex items-center justify-center min-h-[calc(100vh-4rem)]">
+// IMPORTANT: Must have id="root" so LLM can always target it for patches
+const INITIAL_HTML = `<div id="root" class="flex items-center justify-center min-h-[calc(100vh-4rem)]">
   <div class="text-center max-w-md px-4">
     <h1 class="text-2xl font-light text-[#0a0a0a] mb-4">Generative UI</h1>
     <p class="text-sm text-[#525252] leading-relaxed">
@@ -41,7 +42,7 @@ const INITIAL_HTML = `<div class="flex items-center justify-center min-h-[calc(1
 const app = {
   sessionId: null as string | null,
   loading: false,
-  stats: null as { cacheRate: number; tokensPerSecond: number; mode: "patches" | "full" } | null,
+  stats: null as { cacheRate: number; tokensPerSecond: number } | null,
 
   getElements() {
     return {
@@ -133,8 +134,6 @@ const app = {
     const { statsEl } = this.getElements();
     if (this.stats) {
       statsEl.innerHTML = `
-        <span title="Generation mode">${this.stats.mode}</span>
-        <span class="text-[#a3a3a3]">·</span>
         <span title="Tokens per second">${this.stats.tokensPerSecond} tok/s</span>
         <span class="text-[#a3a3a3]">·</span>
         <span title="Cache hit rate">${this.stats.cacheRate}% cache</span>
@@ -162,7 +161,6 @@ const app = {
         this.stats = {
           cacheRate: event.cacheRate,
           tokensPerSecond: event.tokensPerSecond,
-          mode: event.mode,
         };
         this.updateStats();
         break;

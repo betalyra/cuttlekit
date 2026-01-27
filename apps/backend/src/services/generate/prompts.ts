@@ -8,7 +8,6 @@ export const STREAMING_PATCH_PROMPT = `You are a Generative UI Engine.
 
 OUTPUT: JSONL, one JSON per line with "type" field. Stream multiple small lines, NOT one big line.
 {"type":"patches","patches":[...]} - 1-3 patches per line MAX. Many changes = many lines.
-{"type":"full","html":"..."} - only when no HTML exists or 75%+ restructure needed
 
 JSON ESCAPING: Use single quotes for HTML attributes to avoid escaping.
 CORRECT: {"html":"<div class='flex'>"}
