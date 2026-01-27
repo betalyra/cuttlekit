@@ -167,6 +167,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
         validationDoc: Document,
         usageRef: Ref.Ref<Usage[]>,
         patchesRef: Ref.Ref<Patch[]>,
+        modeRef: Ref.Ref<"patches" | "full">,
         attempt: number,
       ): Stream.Stream<UnifiedResponse, Error> => {
         if (attempt >= MAX_RETRY_ATTEMPTS) {
@@ -178,7 +179,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
         return pipe(
           createAttemptStream(messages, validationDoc, usageRef),
 
-          // Track successful patches and log
+          // Track successful patches, mode, and log
           Stream.tap((response) =>
             Effect.gen(function* () {
               if (response.type === "patches") {
@@ -186,6 +187,8 @@ export class GenerateService extends Effect.Service<GenerateService>()(
                   ...ps,
                   ...response.patches,
                 ]);
+              } else if (response.type === "full") {
+                yield* Ref.set(modeRef, "full");
               }
               yield* Effect.log(`[Attempt ${attempt}] Emitting response`, {
                 type: response.type,
@@ -229,6 +232,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
                     validationDoc,
                     usageRef,
                     patchesRef,
+                    modeRef,
                     attempt + 1,
                   ),
                 );
@@ -332,6 +336,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
           // Create Refs to track state across retries
           const usageRef = yield* Ref.make<Usage[]>([]);
           const patchesRef = yield* Ref.make<Patch[]>([]);
+          const modeRef = yield* Ref.make<"patches" | "full">("patches");
           const startTime = yield* DateTime.now;
 
           // Create the streaming pipeline with retry - TRUE STREAMING!
@@ -340,6 +345,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
             validationDoc,
             usageRef,
             patchesRef,
+            modeRef,
             0,
           );
 
@@ -395,10 +401,15 @@ export class GenerateService extends Effect.Service<GenerateService>()(
                 attempts: usages.length,
               });
 
+              const mode = yield* Ref.get(modeRef);
+              const patches = yield* Ref.get(patchesRef);
+
               return {
                 type: "stats" as const,
                 cacheRate: Math.round(cacheRate),
                 tokensPerSecond: Math.round(tokensPerSecond),
+                mode,
+                patchCount: patches.length,
               };
             }),
           );
