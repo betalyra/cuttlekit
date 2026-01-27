@@ -25,7 +25,7 @@ type StreamEvent =
   | { type: "session"; sessionId: string }
   | { type: "patch"; patch: Patch }
   | { type: "html"; html: string }
-  | { type: "stats"; cacheRate: number; tokensPerSecond: number }
+  | { type: "stats"; cacheRate: number; tokensPerSecond: number; mode: "patches" | "full" }
   | { type: "done"; html: string };
 
 // Initial intro HTML - sent as currentHtml on first request
@@ -41,7 +41,7 @@ const INITIAL_HTML = `<div class="flex items-center justify-center min-h-[calc(1
 const app = {
   sessionId: null as string | null,
   loading: false,
-  stats: null as { cacheRate: number; tokensPerSecond: number } | null,
+  stats: null as { cacheRate: number; tokensPerSecond: number; mode: "patches" | "full" } | null,
 
   getElements() {
     return {
@@ -133,9 +133,11 @@ const app = {
     const { statsEl } = this.getElements();
     if (this.stats) {
       statsEl.innerHTML = `
+        <span title="Generation mode">${this.stats.mode}</span>
+        <span class="text-[#a3a3a3]">·</span>
         <span title="Tokens per second">${this.stats.tokensPerSecond} tok/s</span>
         <span class="text-[#a3a3a3]">·</span>
-        <span title="Cache hit rate">${this.stats.cacheRate}% Prompt cache</span>
+        <span title="Cache hit rate">${this.stats.cacheRate}% cache</span>
       `;
       statsEl.style.display = "flex";
     } else {
@@ -160,6 +162,7 @@ const app = {
         this.stats = {
           cacheRate: event.cacheRate,
           tokensPerSecond: event.tokensPerSecond,
+          mode: event.mode,
         };
         this.updateStats();
         break;

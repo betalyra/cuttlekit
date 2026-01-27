@@ -31,6 +31,7 @@ export const UnifiedResponseSchema = z.union([
     type: z.literal("stats"),
     cacheRate: z.number(),
     tokensPerSecond: z.number(),
+    mode: z.enum(["patches", "full"]),
   }),
 ]);
 
