@@ -33,9 +33,13 @@ export const GoogleLanguageModelLayer = (modelId: string) =>
       });
       return {
         model: google(modelId),
-        providerOptions: {},
+        providerOptions: {
+          thinkingConfig: {
+            thinkingLevel: "minimal",
+          },
+        },
         extractUsage: extractGoogleUsage,
         providerName: "google",
       };
-    })
+    }),
   ).pipe(Layer.orDie);
