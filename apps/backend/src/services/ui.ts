@@ -47,7 +47,7 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
       | { type: "session"; sessionId: string }
       | { type: "patch"; patch: Patch }
       | { type: "html"; html: string }
-      | { type: "stats"; cacheRate: number; tokensPerSecond: number; mode: "patches" | "full" }
+      | { type: "stats"; cacheRate: number; tokensPerSecond: number }
       | { type: "done"; html: string };
 
     const generateStream = (request: UIRequest) =>
@@ -130,14 +130,12 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
             Match.when({ type: "patches" }, (r) =>
               handlePatchResponse(r.patches),
             ),
-            Match.when({ type: "full" }, (r) => handleFullResponse(r.html)),
             Match.when({ type: "stats" }, (r) =>
               Effect.succeed([
                 {
                   type: "stats" as const,
                   cacheRate: r.cacheRate,
                   tokensPerSecond: r.tokensPerSecond,
-                  mode: r.mode,
                 } as StreamEvent,
               ]),
             ),

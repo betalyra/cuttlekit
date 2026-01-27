@@ -6,7 +6,7 @@ import { accumulateLinesWithFlush } from "../../stream/utils.js";
 import { PatchValidator, type Patch } from "../vdom/index.js";
 import {
   PatchSchema,
-  UnifiedResponseSchema,
+  LLMResponseSchema,
   JsonParseError,
   type UnifiedResponse,
   type UnifiedGenerateOptions,
@@ -44,10 +44,10 @@ export class GenerateService extends Effect.Service<GenerateService>()(
               }),
           });
 
-          // Try parsing as UnifiedResponse first
-          const unifiedResult = UnifiedResponseSchema.safeParse(parseResult);
-          if (unifiedResult.success) {
-            return unifiedResult.data;
+          // Try parsing as LLM response (patches only)
+          const llmResult = LLMResponseSchema.safeParse(parseResult);
+          if (llmResult.success) {
+            return llmResult.data;
           }
 
           // Fallback: check if it's a raw patch and wrap it
@@ -62,7 +62,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
           // Neither valid - fail with JsonParseError
           return yield* new JsonParseError({
             line,
-            message: `Invalid response format: ${unifiedResult.error.message}`,
+            message: `Invalid response format: ${llmResult.error.message}`,
           });
         });
 
@@ -167,7 +167,6 @@ export class GenerateService extends Effect.Service<GenerateService>()(
         validationDoc: Document,
         usageRef: Ref.Ref<Usage[]>,
         patchesRef: Ref.Ref<Patch[]>,
-        modeRef: Ref.Ref<"patches" | "full">,
         attempt: number,
       ): Stream.Stream<UnifiedResponse, Error> => {
         if (attempt >= MAX_RETRY_ATTEMPTS) {
@@ -179,7 +178,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
         return pipe(
           createAttemptStream(messages, validationDoc, usageRef),
 
-          // Track successful patches, mode, and log
+          // Track successful patches and log
           Stream.tap((response) =>
             Effect.gen(function* () {
               if (response.type === "patches") {
@@ -187,8 +186,6 @@ export class GenerateService extends Effect.Service<GenerateService>()(
                   ...ps,
                   ...response.patches,
                 ]);
-              } else if (response.type === "full") {
-                yield* Ref.set(modeRef, "full");
               }
               yield* Effect.log(`[Attempt ${attempt}] Emitting response`, {
                 type: response.type,
@@ -232,7 +229,6 @@ export class GenerateService extends Effect.Service<GenerateService>()(
                     validationDoc,
                     usageRef,
                     patchesRef,
-                    modeRef,
                     attempt + 1,
                   ),
                 );
@@ -336,7 +332,6 @@ export class GenerateService extends Effect.Service<GenerateService>()(
           // Create Refs to track state across retries
           const usageRef = yield* Ref.make<Usage[]>([]);
           const patchesRef = yield* Ref.make<Patch[]>([]);
-          const modeRef = yield* Ref.make<"patches" | "full">("patches");
           const startTime = yield* DateTime.now;
 
           // Create the streaming pipeline with retry - TRUE STREAMING!
@@ -345,7 +340,6 @@ export class GenerateService extends Effect.Service<GenerateService>()(
             validationDoc,
             usageRef,
             patchesRef,
-            modeRef,
             0,
           );
 
@@ -401,13 +395,10 @@ export class GenerateService extends Effect.Service<GenerateService>()(
                 attempts: usages.length,
               });
 
-              const mode = yield* Ref.get(modeRef);
-
               return {
                 type: "stats" as const,
                 cacheRate: Math.round(cacheRate),
                 tokensPerSecond: Math.round(tokensPerSecond),
-                mode,
               };
             }),
           );
