@@ -8,7 +8,7 @@ export type StreamEvent =
   | { type: "session"; sessionId: string }
   | { type: "patch"; patch: Patch }
   | { type: "html"; html: string }
-  | { type: "stats"; cacheRate: number; tokensPerSecond: number }
+  | { type: "stats"; cacheRate: number; tokensPerSecond: number; mode: "patches" | "full"; patchCount: number }
   | { type: "done"; html: string };
 
 /**

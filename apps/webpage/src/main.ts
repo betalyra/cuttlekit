@@ -25,7 +25,7 @@ type StreamEvent =
   | { type: "session"; sessionId: string }
   | { type: "patch"; patch: Patch }
   | { type: "html"; html: string }
-  | { type: "stats"; cacheRate: number; tokensPerSecond: number }
+  | { type: "stats"; cacheRate: number; tokensPerSecond: number; mode: "patches" | "full"; patchCount: number }
   | { type: "done"; html: string };
 
 // Initial intro HTML - sent as currentHtml on first request
@@ -42,7 +42,7 @@ const INITIAL_HTML = `<div id="root" class="flex items-center justify-center min
 const app = {
   sessionId: null as string | null,
   loading: false,
-  stats: null as { cacheRate: number; tokensPerSecond: number } | null,
+  stats: null as { cacheRate: number; tokensPerSecond: number; mode: "patches" | "full"; patchCount: number } | null,
 
   getElements() {
     return {
@@ -133,7 +133,12 @@ const app = {
   updateStats() {
     const { statsEl } = this.getElements();
     if (this.stats) {
+      const modeDisplay = this.stats.mode === "patches"
+        ? `${this.stats.patchCount} patches`
+        : "full";
       statsEl.innerHTML = `
+        <span title="Generation mode">${modeDisplay}</span>
+        <span class="text-[#a3a3a3]">·</span>
         <span title="Tokens per second">${this.stats.tokensPerSecond} tok/s</span>
         <span class="text-[#a3a3a3]">·</span>
         <span title="Cache hit rate">${this.stats.cacheRate}% cache</span>
@@ -161,6 +166,8 @@ const app = {
         this.stats = {
           cacheRate: event.cacheRate,
           tokensPerSecond: event.tokensPerSecond,
+          mode: event.mode,
+          patchCount: event.patchCount,
         };
         this.updateStats();
         break;
