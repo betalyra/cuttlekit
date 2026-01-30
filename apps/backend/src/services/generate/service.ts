@@ -17,6 +17,7 @@ import {
   STREAMING_PATCH_PROMPT,
   buildCorrectivePrompt,
   safeAsyncIterable,
+  PromptLogger,
 } from "./index.js";
 import type { GenerationError } from "./errors.js";
 
@@ -29,6 +30,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
         yield* LanguageModelProvider;
       const memory = yield* MemoryService;
       const patchValidator = yield* PatchValidator;
+      const promptLogger = yield* PromptLogger;
 
       // ============================================================
       // Parse JSON line - fails with JsonParseError for retry
@@ -307,26 +309,29 @@ export class GenerateService extends Effect.Service<GenerateService>()(
             );
           }
 
-          // Build current request
-          const currentParts: string[] = [];
-          if (currentHtml) {
-            currentParts.push(`HTML:\n${currentHtml}`);
-          }
-          if (action) {
-            currentParts.push(
-              `[NOW] Action: ${action} Data: ${JSON.stringify(actionData, null, 0)}`,
-            );
-          } else if (prompt) {
-            currentParts.push(`[NOW] Prompt: ${prompt}`);
-          }
+          // Build current action (most volatile - goes at end)
+          const actionPart = action
+            ? `[NOW] Action: ${action} Data: ${JSON.stringify(actionData, null, 0)}`
+            : prompt
+              ? `[NOW] Prompt: ${prompt}`
+              : null;
+
+          // Message structure optimized for prompt caching:
+          // 1. System prompt (static - always cached)
+          // 2. Single user message: HTML → History → [NOW] (most volatile last)
+          const userContent = [
+            currentHtml ? `HTML:\n${currentHtml}` : null,
+            ...historyParts,
+            actionPart,
+          ].filter(Boolean).join("\n\n");
 
           const messages: readonly Message[] = [
             { role: "system", content: STREAMING_PATCH_PROMPT },
-            ...(historyParts.length > 0
-              ? [{ role: "user" as const, content: historyParts.join("\n") }]
-              : []),
-            { role: "user", content: currentParts.join("\n\n") },
+            { role: "user", content: userContent },
           ];
+
+          // Log prompt to file if enabled
+          yield* promptLogger.logMessages(messages);
 
           // Create validation document from current HTML (or empty)
           const validationDoc = yield* patchValidator.createValidationDocument(
