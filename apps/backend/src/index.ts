@@ -1,10 +1,10 @@
 import { HttpApiBuilder, HttpMiddleware, HttpServer } from "@effect/platform";
-import { NodeHttpServer, NodeRuntime } from "@effect/platform-node";
+import { NodeHttpServer, NodeRuntime, NodeFileSystem, NodePath } from "@effect/platform-node";
 import { Config, Effect, Layer, Logger, LogLevel } from "effect";
 import { createServer } from "node:http";
 
 import { api, healthGroupLive, makeGenerateGroupLive } from "./api.js";
-import { GenerateService } from "./services/generate/index.js";
+import { GenerateService, PromptLogger } from "./services/generate/index.js";
 import {
   GroqLanguageModelLayer,
   GoogleLanguageModelLayer,
@@ -61,11 +61,18 @@ const MemoryWithDeps = MemoryService.Default.pipe(
 // Session service depends on store
 const SessionWithDeps = SessionService.Default.pipe(Layer.provide(StoreWithDb));
 
-// Generate service depends on memory and LLM
+// Prompt logger depends on FileSystem and Path
+const PromptLoggerWithDeps = PromptLogger.Default.pipe(
+  Layer.provide(NodeFileSystem.layer),
+  Layer.provide(NodePath.layer),
+);
+
+// Generate service depends on memory, LLM, and prompt logger
 const GenerateWithDeps = GenerateService.Default.pipe(
   Layer.provide(MemoryWithDeps),
   Layer.provide(LlmLayerLive),
   Layer.provide(PatchValidator.Default),
+  Layer.provide(PromptLoggerWithDeps),
 );
 
 // UI service depends on generate, memory, session, vdom
