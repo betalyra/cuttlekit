@@ -50,7 +50,13 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
       | { type: "session"; sessionId: string }
       | { type: "patch"; patch: Patch }
       | { type: "html"; html: string }
-      | { type: "stats"; cacheRate: number; tokensPerSecond: number; mode: "patches" | "full"; patchCount: number }
+      | {
+          type: "stats";
+          cacheRate: number;
+          tokensPerSecond: number;
+          mode: "patches" | "full";
+          patchCount: number;
+        }
       | { type: "done"; html: string };
 
     // Extract prompts and actions from the actions array
@@ -82,6 +88,7 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
     const generateStream = (request: UIRequest) =>
       Effect.gen(function* () {
         const { sessionId, currentHtml } = yield* resolveSession(request);
+        const durableSessionId = request.sessionId ?? sessionId;
         const { prompts, userActions, prompt, action, actionData } =
           extractFromActions(request.actions);
 
@@ -111,7 +118,7 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
         // Start with session event
         const sessionEvent = Stream.make({
           type: "session" as const,
-          sessionId,
+          sessionId: durableSessionId,
         } as StreamEvent);
 
         // Track changes for memory saving
@@ -135,10 +142,15 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
               }),
             );
             // Track patches for memory (accumulate if multiple patch responses)
-            yield* Ref.update(memoryChangeRef, (current): MemoryChange =>
-              current?.type === "patches"
-                ? { type: "patches", patches: [...current.patches, ...patches] }
-                : { type: "patches", patches },
+            yield* Ref.update(
+              memoryChangeRef,
+              (current): MemoryChange =>
+                current?.type === "patches"
+                  ? {
+                      type: "patches",
+                      patches: [...current.patches, ...patches],
+                    }
+                  : { type: "patches", patches },
             );
             return events;
           });
