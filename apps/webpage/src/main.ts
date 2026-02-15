@@ -1,33 +1,12 @@
 import "./style.css";
 import { loadFontsFromHTML } from "./fonts";
 import { loadIconsFromHTML } from "./icons";
+import type { Patch, StreamEventWithOffset } from "@betalyra/generative-ui-common/client";
 
 const API_BASE = "http://localhost:34512";
 const STORAGE_KEY = "generative-ui-stream";
 
-// Patch types matching backend
-type Patch =
-  | { selector: string; text: string }
-  | { selector: string; attr: Record<string, string | null> }
-  | { selector: string; append: string }
-  | { selector: string; prepend: string }
-  | { selector: string; html: string }
-  | { selector: string; remove: true };
-
-// Stream event types
-type StreamEvent =
-  | { type: "session"; sessionId: string; offset: number }
-  | { type: "patch"; patch: Patch; offset: number }
-  | { type: "html"; html: string; offset: number }
-  | {
-      type: "stats";
-      cacheRate: number;
-      tokensPerSecond: number;
-      mode: "patches" | "full";
-      patchCount: number;
-      offset: number;
-    }
-  | { type: "done"; html: string; offset: number };
+type StreamEvent = StreamEventWithOffset;
 
 type StreamState = {
   sessionId: string;
@@ -180,7 +159,7 @@ const app = {
         }
         break;
       case "patch":
-        this.applyPatch(event.patch);
+        this.applyPatch(event.patch as Patch);
         break;
       case "html":
         this.getElements().contentEl.innerHTML = event.html;

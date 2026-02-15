@@ -67,7 +67,7 @@ describe("GenerateService", () => {
         const stream = yield* service.streamUnified({
           sessionId: "test",
           currentHtml: '<div id="app">old</div>',
-          prompt: "Say hello",
+          actions: [{ type: "prompt", prompt: "Say hello" }],
         });
 
         const results = yield* Stream.runCollect(stream);
@@ -89,7 +89,7 @@ describe("GenerateService", () => {
         const service = yield* GenerateService;
         const stream = yield* service.streamUnified({
           sessionId: "test",
-          prompt: "Create app",
+          actions: [{ type: "prompt", prompt: "Create app" }],
         });
 
         const results = yield* Stream.runCollect(stream);
@@ -110,7 +110,7 @@ describe("GenerateService", () => {
         const stream = yield* service.streamUnified({
           sessionId: "test",
           currentHtml: '<div id="a">old</div><div id="b">old</div>',
-          prompt: "Update both",
+          actions: [{ type: "prompt", prompt: "Update both" }],
         });
 
         const results = yield* Stream.runCollect(stream);

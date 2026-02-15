@@ -3,8 +3,8 @@ import { GenerateService, type UnifiedResponse } from "./generate/index.js";
 import { MemoryService, type MemoryChange } from "./memory/index.js";
 import { SessionService } from "./session.js";
 import { VdomService, type Patch } from "./vdom/index.js";
-import type { UserAction } from "../types/messages.js";
 import type { Action } from "./durable/types.js";
+import type { UserAction } from "../types/messages.js";
 
 export type UIRequest = {
   sessionId?: string;
@@ -25,7 +25,11 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
         const session = yield* sessionService.getOrCreateSession(
           request.sessionId,
         );
-        const sessionId = session.id;
+        // Use the stable durable session ID for VDOM when provided,
+        // otherwise fall back to the internal session ID.
+        // This ensures consecutive calls from the same durable session
+        // share the same VDOM state.
+        const sessionId = request.sessionId ?? session.id;
 
         // Use most recent action's currentHtml as fallback
         const clientHtml = [...request.actions]
@@ -59,66 +63,35 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
         }
       | { type: "done"; html: string };
 
-    // Extract prompts and actions from the actions array
-    const extractFromActions = (actions: readonly Action[]) => {
-      const prompts = actions
-        .filter((a) => a.type === "prompt" && a.prompt)
-        .map((a) => a.prompt!);
-      const userActions = actions
-        .filter((a) => a.type === "action" && a.action)
-        .map(
-          (a) =>
-            ({
-              action: a.action!,
-              data: a.actionData,
-            }) as UserAction,
-        );
-
-      // Compose prompt from all prompts and actions
-      const prompt = prompts.length > 0 ? prompts.join("\n") : undefined;
-      const action = userActions.length > 0 ? userActions[0].action : undefined;
-      const actionData =
-        userActions.length > 0
-          ? (userActions[0].data as Record<string, unknown> | undefined)
-          : undefined;
-
-      return { prompts, userActions, prompt, action, actionData };
-    };
-
     const generateStream = (request: UIRequest) =>
       Effect.gen(function* () {
         const { sessionId, currentHtml } = yield* resolveSession(request);
-        const durableSessionId = request.sessionId ?? sessionId;
-        const { prompts, userActions, prompt, action, actionData } =
-          extractFromActions(request.actions);
 
         yield* Effect.log("UIService.generateStream", {
-          action,
-          prompt,
           actionCount: request.actions.length,
           hasCurrentHtml: !!currentHtml,
         });
 
         // Handle "reset" action - clear VDOM before generation
-        const isResetAction = action === "reset";
+        const isResetAction = request.actions.some(
+          (a) => a.type === "action" && a.action === "reset",
+        );
         if (isResetAction) {
           yield* vdomService.deleteSession(sessionId);
           yield* Effect.log("Session reset, generating fresh UI");
         }
 
-        // Get unified stream from GenerateService - AI decides patches vs full
+        // Pass the full actions array to the generate service
         const unifiedStream = yield* generateService.streamUnified({
           sessionId,
           currentHtml: isResetAction ? undefined : (currentHtml ?? undefined),
-          prompt,
-          action,
-          actionData,
+          actions: request.actions,
         });
 
         // Start with session event
         const sessionEvent = Stream.make({
           type: "session" as const,
-          sessionId: durableSessionId,
+          sessionId,
         } as StreamEvent);
 
         // Track changes for memory saving
@@ -201,6 +174,13 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
             // Save memory asynchronously (non-blocking via queue)
             const memoryChange = yield* Ref.get(memoryChangeRef);
             if (memoryChange) {
+              const prompts = request.actions
+                .filter((a) => a.type === "prompt" && a.prompt)
+                .map((a) => a.prompt!);
+              const userActions: UserAction[] = request.actions
+                .filter((a) => a.type === "action" && a.action)
+                .map((a) => ({ action: a.action!, data: a.actionData }));
+
               yield* memoryService.saveMemory({
                 sessionId,
                 prompts: prompts.length > 0 ? prompts : undefined,
