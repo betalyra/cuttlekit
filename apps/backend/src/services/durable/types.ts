@@ -1,68 +1,23 @@
 import { Schema } from "effect";
 import type { Queue, PubSub, Ref, Fiber, Scope } from "effect";
+import type { Action, StreamEventWithOffset } from "@betalyra/generative-ui-common/client";
 
-// ============================================================
-// Action Schema (submitted via POST /stream/:sessionId)
-// ============================================================
-
-export const ActionSchema = Schema.Struct({
-  type: Schema.Literal("prompt", "action"),
-  prompt: Schema.optional(Schema.String),
-  action: Schema.optional(Schema.String),
-  actionData: Schema.optional(
-    Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-  ),
-  currentHtml: Schema.optional(Schema.String),
-});
-
-export type Action = typeof ActionSchema.Type;
-
-// ============================================================
-// Stream Event Schema (emitted to subscribers via GET SSE)
-// ============================================================
-
-export const PatchEventSchema = Schema.Struct({
-  type: Schema.Literal("patch"),
-  patch: Schema.Unknown, // Patch type from vdom -- validated elsewhere
-});
-
-export const HtmlEventSchema = Schema.Struct({
-  type: Schema.Literal("html"),
-  html: Schema.String,
-});
-
-export const StatsEventSchema = Schema.Struct({
-  type: Schema.Literal("stats"),
-  cacheRate: Schema.Number,
-  tokensPerSecond: Schema.Number,
-  mode: Schema.Literal("patches", "full"),
-  patchCount: Schema.Number,
-});
-
-export const DoneEventSchema = Schema.Struct({
-  type: Schema.Literal("done"),
-  html: Schema.String,
-});
-
-export const SessionEventSchema = Schema.Struct({
-  type: Schema.Literal("session"),
-  sessionId: Schema.String,
-});
-
-export const StreamEventSchema = Schema.Union(
+// Re-export shared types so existing imports keep working
+export {
+  ActionSchema,
+  type Action,
   SessionEventSchema,
   PatchEventSchema,
   HtmlEventSchema,
   StatsEventSchema,
   DoneEventSchema,
-);
-
-export type StreamEvent = typeof StreamEventSchema.Type;
-
-export type StreamEventWithOffset = StreamEvent & { readonly offset: number };
+  StreamEventSchema,
+  type StreamEvent,
+  type StreamEventWithOffset,
+} from "@betalyra/generative-ui-common/client";
 
 // ============================================================
-// Action Payload Schema (for POST endpoint body)
+// Action Payload Schema (for POST endpoint body — no `type` field)
 // ============================================================
 
 export const ActionPayloadSchema = Schema.Struct({

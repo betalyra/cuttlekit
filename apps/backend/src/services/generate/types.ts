@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { Action } from "@betalyra/generative-ui-common/client";
 
 // ============================================================
 // Zod Schemas
@@ -51,9 +52,7 @@ export type UnifiedResponse = z.infer<typeof UnifiedResponseSchema>;
 export type UnifiedGenerateOptions = {
   sessionId: string;
   currentHtml?: string;
-  prompt?: string;
-  action?: string;
-  actionData?: Record<string, unknown>;
+  actions: readonly Action[];
 };
 
 // ============================================================

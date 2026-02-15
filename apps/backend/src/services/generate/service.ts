@@ -249,18 +249,21 @@ export class GenerateService extends Effect.Service<GenerateService>()(
       // ============================================================
       const streamUnified = (options: UnifiedGenerateOptions) =>
         Effect.gen(function* () {
+          const { sessionId, currentHtml, actions } = options;
+
           yield* Effect.log("Streaming unified response", {
             provider: providerName,
-            action: options.action,
-            prompt: options.prompt,
-            hasCurrentHtml: !!options.currentHtml,
+            actionCount: actions.length,
+            hasCurrentHtml: !!currentHtml,
           });
 
-          const { sessionId, currentHtml, prompt, action, actionData } =
-            options;
-
-          // Build semantic context from memory
-          const searchQuery = prompt || `user action: ${action}`;
+          // Build memory search query from all actions/prompts
+          const searchQueryParts = actions.map((a) =>
+            a.type === "prompt" && a.prompt
+              ? a.prompt
+              : `user action: ${a.action}`,
+          );
+          const searchQuery = searchQueryParts.join("; ");
 
           // Fetch recent entries and semantic search results
           const [recentEntries, relevantEntries] = yield* Effect.all([
@@ -309,11 +312,16 @@ export class GenerateService extends Effect.Service<GenerateService>()(
             );
           }
 
-          // Build current action (most volatile - goes at end)
-          const actionPart = action
-            ? `[NOW] Action: ${action} Data: ${JSON.stringify(actionData, null, 0)}`
-            : prompt
-              ? `[NOW] Prompt: ${prompt}`
+          // Build current actions (most volatile - goes at end)
+          // Lists all batched actions/prompts in chronological order (1 = oldest, N = latest)
+          const actionLines = actions.map((a, i) =>
+            a.type === "prompt" && a.prompt
+              ? `${i + 1}. Prompt: ${a.prompt}`
+              : `${i + 1}. Action: ${a.action} Data: ${JSON.stringify(a.actionData, null, 0)}`,
+          );
+          const actionPart =
+            actionLines.length > 0
+              ? `[NOW]\n${actionLines.join("\n")}`
               : null;
 
           // Message structure optimized for prompt caching:
