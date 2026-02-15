@@ -959,23 +959,1196 @@ Effect.catchTag("RateLimitExceeded", (err) =>
 |----------|----------|-----------|
 | Batching strategy | Take whatever is queued | Simple, no artificial delays |
 | Hub vs PubSub | Hub + offset reconnection | Offset-based is sufficient, simpler |
-| Event retention | 24h global | Balance storage vs. reconnection window |
+| Event retention | 10 minutes | Short retention for reconnection, minimal storage |
 | State reconstruction | Option C (done event) | Fast for common case, no extra storage |
 | Rate limiting | Per-session + global | Protect against abuse and costs |
 
 ---
 
-## Next Steps
+# Low-Level Implementation Plan
 
-Once this high-level design is approved:
+## File Structure
 
-1. Define exact service interfaces with Effect types
-2. Add `stream_events` table with Drizzle migration
-3. Implement `DurableEventLog` service
-4. Implement `ProcessorRegistry` with Ref + HashMap + acquireRelease
-5. Implement `RateLimiterRegistry` service
-6. Modify `GenerateService` to work with Queue/Hub pattern
-7. Add HTTP handlers with reconnection logic
-8. Add dormancy checker and cleanup background fibers
-9. Frontend: localStorage offset tracking and reconnection
-10. Testing: reconnection scenarios, rate limiting, batching
+```
+apps/backend/src/services/
+├── durable/
+│   ├── index.ts                 # Re-exports
+│   ├── types.ts                 # Shared types and schemas
+│   ├── event-log.ts             # DurableEventLog service
+│   ├── processor.ts             # SessionProcessor (pure generation loop)
+│   ├── registry.ts              # ProcessorRegistry service
+│   └── schema.ts                # Drizzle schema for stream_events
+├── rate-limit/
+│   ├── index.ts                 # Re-exports
+│   └── service.ts               # RateLimiterRegistry service
+└── generate/
+    └── service.ts               # Existing, minimal changes
+```
+
+---
+
+## Phase 1: Types and Schema
+
+### `services/durable/types.ts`
+
+```typescript
+import { Schema } from "effect";
+import type { Patch } from "../vdom/index.js";
+
+// ============================================================
+// Action Types
+// ============================================================
+
+export type Action = {
+  readonly type: "prompt" | "action";
+  readonly prompt?: string;
+  readonly action?: string;
+  readonly actionData?: Record<string, unknown>;
+  readonly currentHtml?: string;
+};
+
+export const ActionSchema = Schema.Struct({
+  type: Schema.Literal("prompt", "action"),
+  prompt: Schema.optional(Schema.String),
+  action: Schema.optional(Schema.String),
+  actionData: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
+  currentHtml: Schema.optional(Schema.String),
+});
+
+// ============================================================
+// Stream Event Types
+// ============================================================
+
+export type StreamEvent =
+  | { readonly type: "session"; readonly sessionId: string }
+  | { readonly type: "patch"; readonly patch: Patch }
+  | { readonly type: "html"; readonly html: string }
+  | { readonly type: "stats"; readonly cacheRate: number; readonly tokensPerSecond: number; readonly mode: "patches" | "full"; readonly patchCount: number }
+  | { readonly type: "done"; readonly html: string };
+
+export type StreamEventWithOffset = StreamEvent & { readonly offset: number };
+
+// ============================================================
+// Persisted Event (from DB)
+// ============================================================
+
+export type PersistedEvent = {
+  readonly id: number;
+  readonly sessionId: string;
+  readonly offset: number;
+  readonly eventType: string;
+  readonly data: string; // JSON serialized StreamEvent
+  readonly createdAt: number;
+};
+
+// ============================================================
+// Processor State
+// ============================================================
+
+export type SessionProcessor = {
+  readonly sessionId: string;
+  readonly actionQueue: Queue.Queue<Action>;
+  readonly eventHub: Hub.Hub<StreamEventWithOffset>;
+  readonly lastActivity: Ref.Ref<number>;
+  readonly fiber: Fiber.RuntimeFiber<void, never>;
+  readonly scope: Scope.CloseableScope;
+};
+
+// ============================================================
+// Configuration
+// ============================================================
+
+export const DurableConfig = {
+  EVENT_RETENTION_MS: 10 * 60 * 1000,      // 10 minutes
+  DORMANCY_TIMEOUT_MS: 5 * 60 * 1000,      // 5 minutes
+  DORMANCY_CHECK_INTERVAL_MS: 60 * 1000,   // 1 minute
+  CLEANUP_INTERVAL_MS: 60 * 1000,          // 1 minute
+  MAX_BATCH_SIZE: 10,
+} as const;
+```
+
+### `services/durable/schema.ts`
+
+```typescript
+import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
+
+export const streamEvents = sqliteTable(
+  "stream_events",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    sessionId: text("session_id").notNull(),
+    offset: integer("offset").notNull(),
+    eventType: text("event_type").notNull(),
+    data: text("data").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    index("stream_events_session_offset_idx").on(table.sessionId, table.offset),
+    index("stream_events_created_at_idx").on(table.createdAt),
+  ]
+);
+
+export type StreamEventRow = typeof streamEvents.$inferSelect;
+export type NewStreamEventRow = typeof streamEvents.$inferInsert;
+```
+
+---
+
+## Phase 2: DurableEventLog Service
+
+### `services/durable/event-log.ts`
+
+```typescript
+import { Effect, pipe } from "effect";
+import { eq, gt, and, lt, desc, sql } from "drizzle-orm";
+import { Database } from "../memory/database.js";
+import { streamEvents } from "./schema.js";
+import { DurableConfig, type StreamEvent, type PersistedEvent } from "./types.js";
+
+export class DurableEventLog extends Effect.Service<DurableEventLog>()(
+  "DurableEventLog",
+  {
+    accessors: true,
+    effect: Effect.gen(function* () {
+      const { db } = yield* Database;
+
+      /**
+       * Append an event to the log, returning the assigned offset.
+       * Uses a subquery for atomic offset increment.
+       */
+      const append = (sessionId: string, event: StreamEvent) =>
+        Effect.gen(function* () {
+          const now = Date.now();
+          const eventData = JSON.stringify(event);
+
+          // Get next offset atomically
+          const maxOffsetResult = yield* Effect.promise(() =>
+            db
+              .select({ maxOffset: sql<number>`COALESCE(MAX(${streamEvents.offset}), -1)` })
+              .from(streamEvents)
+              .where(eq(streamEvents.sessionId, sessionId))
+          );
+
+          const nextOffset = (maxOffsetResult[0]?.maxOffset ?? -1) + 1;
+
+          yield* Effect.promise(() =>
+            db.insert(streamEvents).values({
+              sessionId,
+              offset: nextOffset,
+              eventType: event.type,
+              data: eventData,
+              createdAt: now,
+            })
+          );
+
+          return nextOffset;
+        });
+
+      /**
+       * Read all events after the given offset for a session.
+       */
+      const readFrom = (sessionId: string, fromOffset: number) =>
+        Effect.promise(() =>
+          db
+            .select()
+            .from(streamEvents)
+            .where(
+              and(
+                eq(streamEvents.sessionId, sessionId),
+                gt(streamEvents.offset, fromOffset)
+              )
+            )
+            .orderBy(streamEvents.offset)
+        );
+
+      /**
+       * Get the latest offset for a session, or -1 if no events.
+       */
+      const getLatestOffset = (sessionId: string) =>
+        Effect.gen(function* () {
+          const result = yield* Effect.promise(() =>
+            db
+              .select({ maxOffset: sql<number>`COALESCE(MAX(${streamEvents.offset}), -1)` })
+              .from(streamEvents)
+              .where(eq(streamEvents.sessionId, sessionId))
+          );
+          return result[0]?.maxOffset ?? -1;
+        });
+
+      /**
+       * Find the last "done" or "html" event for state reconstruction.
+       */
+      const getLastHtmlEvent = (sessionId: string) =>
+        Effect.gen(function* () {
+          const result = yield* Effect.promise(() =>
+            db
+              .select()
+              .from(streamEvents)
+              .where(
+                and(
+                  eq(streamEvents.sessionId, sessionId),
+                  sql`${streamEvents.eventType} IN ('done', 'html')`
+                )
+              )
+              .orderBy(desc(streamEvents.offset))
+              .limit(1)
+          );
+          return result[0] ?? null;
+        });
+
+      /**
+       * Delete events older than retention period.
+       */
+      const cleanup = Effect.gen(function* () {
+        const cutoff = Date.now() - DurableConfig.EVENT_RETENTION_MS;
+
+        const result = yield* Effect.promise(() =>
+          db
+            .delete(streamEvents)
+            .where(lt(streamEvents.createdAt, cutoff))
+        );
+
+        return result.rowsAffected ?? 0;
+      });
+
+      return {
+        append,
+        readFrom,
+        getLatestOffset,
+        getLastHtmlEvent,
+        cleanup,
+      } as const;
+    }),
+  }
+) {}
+```
+
+---
+
+## Phase 3: SessionProcessor (Pure Generation Loop)
+
+The processor is a pure function that takes dependencies as arguments - no services accessed inside. This makes it easily testable.
+
+### `services/durable/processor.ts`
+
+```typescript
+import { Effect, Queue, Hub, Stream, pipe, Chunk } from "effect";
+import { DurableConfig, type Action, type StreamEvent, type StreamEventWithOffset } from "./types.js";
+
+// ============================================================
+// Dependencies interface (for testability)
+// ============================================================
+
+export type ProcessorDeps = {
+  readonly appendEvent: (sessionId: string, event: StreamEvent) => Effect.Effect<number>;
+  readonly generateStream: (request: GenerateRequest) => Effect.Effect<Stream.Stream<StreamEvent>>;
+  readonly getCurrentHtml: (sessionId: string) => Effect.Effect<string>;
+};
+
+export type GenerateRequest = {
+  readonly sessionId: string;
+  readonly prompt?: string;
+  readonly action?: string;
+  readonly actionData?: Record<string, unknown>;
+  readonly currentHtml: string;
+};
+
+// ============================================================
+// Batch building (pure functions)
+// ============================================================
+
+const buildSingleRequest = (
+  sessionId: string,
+  action: Action,
+  currentHtml: string
+): GenerateRequest => ({
+  sessionId,
+  prompt: action.prompt,
+  action: action.action,
+  actionData: action.actionData,
+  currentHtml: action.currentHtml ?? currentHtml,
+});
+
+const buildBatchRequest = (
+  sessionId: string,
+  actions: readonly Action[],
+  currentHtml: string
+): GenerateRequest => {
+  // Group actions by type for smart batching
+  const actionCounts = new Map<string, number>();
+  for (const a of actions) {
+    if (a.action) {
+      actionCounts.set(a.action, (actionCounts.get(a.action) ?? 0) + 1);
+    }
+  }
+
+  const summary = Array.from(actionCounts.entries())
+    .map(([action, count]) => (count > 1 ? `${action} (${count}x)` : action))
+    .join(", ");
+
+  return {
+    sessionId,
+    action: "batch",
+    actionData: {
+      summary,
+      actions: actions.map((a) => ({
+        type: a.type,
+        action: a.action,
+        data: a.actionData,
+      })),
+    },
+    currentHtml: actions[actions.length - 1]?.currentHtml ?? currentHtml,
+  };
+};
+
+// ============================================================
+// Processing loop (pure, takes deps as argument)
+// ============================================================
+
+export const runProcessingLoop = (
+  sessionId: string,
+  actionQueue: Queue.Queue<Action>,
+  eventHub: Hub.Hub<StreamEventWithOffset>,
+  deps: ProcessorDeps
+) =>
+  Effect.gen(function* () {
+    yield* Effect.log(`Starting processing loop for session ${sessionId}`);
+
+    // Infinite loop - runs until fiber is interrupted
+    yield* Effect.forever(
+      Effect.gen(function* () {
+        // Wait for at least one action, take up to MAX_BATCH_SIZE
+        const actionsChunk = yield* Queue.takeBetween(
+          actionQueue,
+          1,
+          DurableConfig.MAX_BATCH_SIZE
+        );
+        const actions = Chunk.toReadonlyArray(actionsChunk);
+
+        yield* Effect.log(`Processing ${actions.length} action(s)`, {
+          sessionId,
+          actions: actions.map((a) => a.action ?? a.prompt),
+        });
+
+        // Get current HTML state
+        const currentHtml = yield* deps.getCurrentHtml(sessionId);
+
+        // Build request (single or batched)
+        const request =
+          actions.length === 1
+            ? buildSingleRequest(sessionId, actions[0], currentHtml)
+            : buildBatchRequest(sessionId, actions, currentHtml);
+
+        // Get generation stream
+        const stream = yield* deps.generateStream(request);
+
+        // Process each event: persist to log, publish to hub
+        yield* pipe(
+          stream,
+          Stream.mapEffect((event) =>
+            Effect.gen(function* () {
+              // Persist to durable log
+              const offset = yield* deps.appendEvent(sessionId, event);
+
+              // Broadcast to subscribers
+              const eventWithOffset: StreamEventWithOffset = { ...event, offset };
+              yield* Hub.publish(eventHub, eventWithOffset);
+
+              return eventWithOffset;
+            })
+          ),
+          Stream.runDrain
+        );
+
+        yield* Effect.log(`Completed processing batch`, { sessionId });
+      })
+    );
+  });
+
+// ============================================================
+// State reconstruction (pure function)
+// ============================================================
+
+export const reconstructHtml = (
+  lastHtmlEvent: { offset: number; data: string } | null,
+  eventsAfter: readonly { data: string }[],
+  applyPatch: (html: string, patch: unknown) => string,
+  initialHtml: string
+): string => {
+  let html = initialHtml;
+
+  if (lastHtmlEvent) {
+    const parsed = JSON.parse(lastHtmlEvent.data) as StreamEvent;
+    if (parsed.type === "done" || parsed.type === "html") {
+      html = parsed.html;
+    }
+  }
+
+  // Apply any patches after the last html event
+  for (const event of eventsAfter) {
+    const parsed = JSON.parse(event.data) as StreamEvent;
+    if (parsed.type === "patch") {
+      html = applyPatch(html, parsed.patch);
+    } else if (parsed.type === "html" || parsed.type === "done") {
+      html = parsed.html;
+    }
+  }
+
+  return html;
+};
+```
+
+---
+
+## Phase 4: ProcessorRegistry Service
+
+### `services/durable/registry.ts`
+
+```typescript
+import {
+  Effect,
+  Queue,
+  Hub,
+  Ref,
+  Fiber,
+  Scope,
+  HashMap,
+  Option,
+  pipe,
+  Schedule,
+  Duration,
+} from "effect";
+import {
+  DurableConfig,
+  type SessionProcessor,
+  type Action,
+  type StreamEventWithOffset,
+} from "./types.js";
+import { runProcessingLoop, reconstructHtml, type ProcessorDeps } from "./processor.js";
+import { DurableEventLog } from "./event-log.js";
+import { GenerateService } from "../generate/index.js";
+import { PatchValidator } from "../vdom/index.js";
+
+const INITIAL_HTML = `<div id="root"></div>`;
+
+export class ProcessorRegistry extends Effect.Service<ProcessorRegistry>()(
+  "ProcessorRegistry",
+  {
+    accessors: true,
+    effect: Effect.gen(function* () {
+      const eventLog = yield* DurableEventLog;
+      const generate = yield* GenerateService;
+      const patchValidator = yield* PatchValidator;
+
+      // Registry state
+      const processors = yield* Ref.make(HashMap.empty<string, SessionProcessor>());
+
+      // ============================================================
+      // Build dependencies for processor (wires services together)
+      // ============================================================
+
+      const buildProcessorDeps = (sessionId: string): ProcessorDeps => ({
+        appendEvent: (sid, event) => eventLog.append(sid, event),
+
+        generateStream: (request) => generate.streamUnified(request),
+
+        getCurrentHtml: (sid) =>
+          Effect.gen(function* () {
+            const lastHtmlEvent = yield* eventLog.getLastHtmlEvent(sid);
+
+            if (!lastHtmlEvent) {
+              return INITIAL_HTML;
+            }
+
+            const eventsAfter = yield* eventLog.readFrom(sid, lastHtmlEvent.offset);
+
+            return reconstructHtml(
+              lastHtmlEvent,
+              eventsAfter,
+              (html, patch) => {
+                // Use patchValidator to apply patch (simplified - actual impl would use VDOM)
+                // For now, just return html unchanged if patch application is complex
+                return html;
+              },
+              INITIAL_HTML
+            );
+          }),
+      });
+
+      // ============================================================
+      // Create a new processor with its own scope
+      // ============================================================
+
+      const createProcessor = (sessionId: string) =>
+        Effect.gen(function* () {
+          // Create a closeable scope for this processor
+          const scope = yield* Scope.make();
+
+          // Create queue and hub within the scope
+          const actionQueue = yield* Queue.unbounded<Action>();
+          const eventHub = yield* Hub.unbounded<StreamEventWithOffset>();
+          const lastActivity = yield* Ref.make(Date.now());
+
+          // Build deps and start processing loop
+          const deps = buildProcessorDeps(sessionId);
+
+          const fiber = yield* pipe(
+            runProcessingLoop(sessionId, actionQueue, eventHub, deps),
+            Effect.forkIn(scope)
+          );
+
+          const processor: SessionProcessor = {
+            sessionId,
+            actionQueue,
+            eventHub,
+            lastActivity,
+            fiber,
+            scope,
+          };
+
+          return processor;
+        });
+
+      // ============================================================
+      // Public API
+      // ============================================================
+
+      /**
+       * Get existing processor or create a new one.
+       */
+      const getOrCreate = (sessionId: string) =>
+        Effect.gen(function* () {
+          const current = yield* Ref.get(processors);
+          const existing = HashMap.get(current, sessionId);
+
+          if (Option.isSome(existing)) {
+            yield* Ref.set(existing.value.lastActivity, Date.now());
+            return existing.value;
+          }
+
+          // Create new processor
+          const processor = yield* createProcessor(sessionId);
+
+          yield* Ref.update(processors, HashMap.set(sessionId, processor));
+
+          yield* Effect.log(`Created processor for session ${sessionId}`);
+
+          return processor;
+        });
+
+      /**
+       * Update last activity timestamp for a session.
+       */
+      const touch = (sessionId: string) =>
+        Effect.gen(function* () {
+          const current = yield* Ref.get(processors);
+          const existing = HashMap.get(current, sessionId);
+
+          if (Option.isSome(existing)) {
+            yield* Ref.set(existing.value.lastActivity, Date.now());
+          }
+        });
+
+      /**
+       * Release a processor (interrupt fiber, shutdown queue/hub).
+       */
+      const release = (sessionId: string) =>
+        Effect.gen(function* () {
+          const current = yield* Ref.get(processors);
+          const existing = HashMap.get(current, sessionId);
+
+          if (Option.isSome(existing)) {
+            const processor = existing.value;
+
+            yield* Effect.log(`Releasing processor for session ${sessionId}`);
+
+            // Close scope triggers cleanup of fiber, queue, hub
+            yield* Scope.close(processor.scope, Exit.succeed(void 0));
+
+            yield* Ref.update(processors, HashMap.remove(sessionId));
+          }
+        });
+
+      /**
+       * Get all processor session IDs (for dormancy checking).
+       */
+      const getAllSessionIds = Effect.gen(function* () {
+        const current = yield* Ref.get(processors);
+        return HashMap.keys(current);
+      });
+
+      /**
+       * Get last activity time for a session.
+       */
+      const getLastActivity = (sessionId: string) =>
+        Effect.gen(function* () {
+          const current = yield* Ref.get(processors);
+          const existing = HashMap.get(current, sessionId);
+
+          if (Option.isSome(existing)) {
+            return yield* Ref.get(existing.value.lastActivity);
+          }
+
+          return null;
+        });
+
+      return {
+        getOrCreate,
+        touch,
+        release,
+        getAllSessionIds,
+        getLastActivity,
+      } as const;
+    }),
+  }
+) {}
+```
+
+---
+
+## Phase 5: Background Jobs (Dormancy & Cleanup)
+
+### `services/durable/jobs.ts`
+
+```typescript
+import { Effect, Schedule, Duration, pipe } from "effect";
+import { DurableConfig } from "./types.js";
+import { ProcessorRegistry } from "./registry.js";
+import { DurableEventLog } from "./event-log.js";
+
+/**
+ * Background fiber that checks for dormant processors and releases them.
+ */
+export const dormancyChecker = Effect.gen(function* () {
+  const registry = yield* ProcessorRegistry;
+
+  yield* Effect.log("Starting dormancy checker");
+
+  yield* pipe(
+    Effect.gen(function* () {
+      const now = Date.now();
+      const sessionIds = yield* registry.getAllSessionIds;
+
+      for (const sessionId of sessionIds) {
+        const lastActivity = yield* registry.getLastActivity(sessionId);
+
+        if (lastActivity && now - lastActivity > DurableConfig.DORMANCY_TIMEOUT_MS) {
+          yield* Effect.log(`Session ${sessionId} going dormant`);
+          yield* registry.release(sessionId);
+        }
+      }
+    }),
+    Effect.catchAll((error) =>
+      Effect.log(`Dormancy checker error: ${error}`)
+    ),
+    Effect.repeat(Schedule.spaced(Duration.millis(DurableConfig.DORMANCY_CHECK_INTERVAL_MS))),
+  );
+});
+
+/**
+ * Background fiber that cleans up old events from the durable log.
+ */
+export const eventCleanup = Effect.gen(function* () {
+  const eventLog = yield* DurableEventLog;
+
+  yield* Effect.log("Starting event cleanup job");
+
+  yield* pipe(
+    Effect.gen(function* () {
+      const deleted = yield* eventLog.cleanup;
+
+      if (deleted > 0) {
+        yield* Effect.log(`Cleaned up ${deleted} old events`);
+      }
+    }),
+    Effect.catchAll((error) =>
+      Effect.log(`Event cleanup error: ${error}`)
+    ),
+    Effect.repeat(Schedule.spaced(Duration.millis(DurableConfig.CLEANUP_INTERVAL_MS))),
+  );
+});
+
+/**
+ * Start all background jobs. Returns fibers for supervision.
+ */
+export const startBackgroundJobs = Effect.gen(function* () {
+  const dormancyFiber = yield* Effect.fork(dormancyChecker);
+  const cleanupFiber = yield* Effect.fork(eventCleanup);
+
+  yield* Effect.log("Background jobs started");
+
+  return { dormancyFiber, cleanupFiber };
+});
+```
+
+---
+
+## Phase 6: Rate Limiting Service
+
+### `services/rate-limit/service.ts`
+
+```typescript
+import { Effect, RateLimiter, Ref, HashMap, Option, Duration } from "effect";
+
+export type RateLimitConfig = {
+  readonly perSessionLimit: number;
+  readonly perSessionInterval: Duration.Duration;
+  readonly globalLimit: number;
+  readonly globalInterval: Duration.Duration;
+};
+
+const defaultConfig: RateLimitConfig = {
+  perSessionLimit: 10,
+  perSessionInterval: Duration.minutes(1),
+  globalLimit: 1000,
+  globalInterval: Duration.minutes(1),
+};
+
+export class RateLimitExceeded extends Error {
+  readonly _tag = "RateLimitExceeded";
+  constructor(readonly sessionId: string) {
+    super(`Rate limit exceeded for session ${sessionId}`);
+  }
+}
+
+export class RateLimitService extends Effect.Service<RateLimitService>()(
+  "RateLimitService",
+  {
+    accessors: true,
+    effect: Effect.gen(function* () {
+      const sessionLimiters = yield* Ref.make(
+        HashMap.empty<string, RateLimiter.RateLimiter>()
+      );
+
+      const globalLimiter = yield* RateLimiter.make({
+        limit: defaultConfig.globalLimit,
+        interval: defaultConfig.globalInterval,
+      });
+
+      /**
+       * Get or create a rate limiter for a session.
+       */
+      const getSessionLimiter = (sessionId: string) =>
+        Effect.gen(function* () {
+          const current = yield* Ref.get(sessionLimiters);
+          const existing = HashMap.get(current, sessionId);
+
+          if (Option.isSome(existing)) {
+            return existing.value;
+          }
+
+          const limiter = yield* RateLimiter.make({
+            limit: defaultConfig.perSessionLimit,
+            interval: defaultConfig.perSessionInterval,
+          });
+
+          yield* Ref.update(sessionLimiters, HashMap.set(sessionId, limiter));
+
+          return limiter;
+        });
+
+      /**
+       * Acquire a permit for a session action. Blocks until permit available.
+       */
+      const acquireSession = (sessionId: string) =>
+        Effect.gen(function* () {
+          const limiter = yield* getSessionLimiter(sessionId);
+          yield* RateLimiter.take(limiter, 1);
+        });
+
+      /**
+       * Acquire a global permit for LLM call.
+       */
+      const acquireGlobal = RateLimiter.take(globalLimiter, 1);
+
+      /**
+       * Remove rate limiter for a session (called when session goes dormant).
+       */
+      const removeSession = (sessionId: string) =>
+        Ref.update(sessionLimiters, HashMap.remove(sessionId));
+
+      return {
+        acquireSession,
+        acquireGlobal,
+        removeSession,
+      } as const;
+    }),
+  }
+) {}
+```
+
+---
+
+## Phase 7: HTTP Handlers
+
+### `services/durable/handlers.ts`
+
+```typescript
+import { Effect, Stream, pipe } from "effect";
+import { HttpRouter, HttpServerRequest, HttpServerResponse, HttpHeaders } from "@effect/platform";
+import { Schema } from "effect";
+import { ProcessorRegistry } from "./registry.js";
+import { DurableEventLog } from "./event-log.js";
+import { RateLimitService, RateLimitExceeded } from "../rate-limit/service.js";
+import { Queue } from "effect";
+
+// ============================================================
+// Request Schema
+// ============================================================
+
+const GenerateStreamRequest = Schema.Struct({
+  sessionId: Schema.String,
+  action: Schema.optional(Schema.String),
+  actionData: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
+  prompt: Schema.optional(Schema.String),
+  currentHtml: Schema.optional(Schema.String),
+  reconnect: Schema.optional(Schema.Boolean),
+  fromOffset: Schema.optional(Schema.Number),
+});
+
+// ============================================================
+// Handler
+// ============================================================
+
+export const generateStreamHandler = HttpRouter.post(
+  "/generate/stream",
+  Effect.gen(function* () {
+    const body = yield* HttpServerRequest.schemaBodyJson(GenerateStreamRequest);
+    const registry = yield* ProcessorRegistry;
+    const eventLog = yield* DurableEventLog;
+    const rateLimiter = yield* RateLimitService;
+
+    // Rate limit check (per-session)
+    yield* pipe(
+      rateLimiter.acquireSession(body.sessionId),
+      Effect.timeout(Duration.seconds(5)),
+      Effect.catchTag("TimeoutException", () =>
+        Effect.fail(new RateLimitExceeded(body.sessionId))
+      )
+    );
+
+    // Get or create processor
+    const processor = yield* registry.getOrCreate(body.sessionId);
+
+    // Handle reconnection - get missed events
+    const missedEvents =
+      body.reconnect && body.fromOffset !== undefined
+        ? yield* eventLog.readFrom(body.sessionId, body.fromOffset)
+        : [];
+
+    // Enqueue action if present (prompt or action)
+    if (body.action || body.prompt) {
+      yield* Queue.offer(processor.actionQueue, {
+        type: body.prompt ? "prompt" : "action",
+        prompt: body.prompt,
+        action: body.action,
+        actionData: body.actionData,
+        currentHtml: body.currentHtml,
+      });
+    }
+
+    // Build SSE stream
+    const missedStream = Stream.fromIterable(
+      missedEvents.map((e) => ({
+        ...JSON.parse(e.data),
+        offset: e.offset,
+      }))
+    );
+
+    const liveStream = Stream.fromHub(processor.eventHub);
+
+    const eventStream = pipe(
+      Stream.concat(missedStream, liveStream),
+      Stream.map(
+        (event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`
+      )
+    );
+
+    return HttpServerResponse.stream(eventStream, {
+      contentType: "text/event-stream",
+      headers: HttpHeaders.fromInput({
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Session-Id": body.sessionId,
+      }),
+    });
+  }).pipe(
+    Effect.catchTag("RateLimitExceeded", (err) =>
+      HttpServerResponse.json(
+        { error: "Rate limit exceeded", retryAfter: 60 },
+        { status: 429 }
+      )
+    )
+  )
+);
+```
+
+---
+
+## Phase 8: Frontend Changes
+
+### `apps/webpage/src/stream.ts` (new file)
+
+```typescript
+const STREAM_KEY = "generative-ui-stream";
+
+export type StreamState = {
+  sessionId: string;
+  lastOffset: number;
+};
+
+export const saveStreamState = (state: StreamState) => {
+  localStorage.setItem(STREAM_KEY, JSON.stringify(state));
+};
+
+export const loadStreamState = (): StreamState | null => {
+  const saved = localStorage.getItem(STREAM_KEY);
+  if (!saved) return null;
+  try {
+    return JSON.parse(saved);
+  } catch {
+    return null;
+  }
+};
+
+export const clearStreamState = () => {
+  localStorage.removeItem(STREAM_KEY);
+};
+```
+
+### Updates to `apps/webpage/src/main.ts`
+
+```typescript
+import { saveStreamState, loadStreamState, clearStreamState, type StreamState } from "./stream";
+
+const app = {
+  // ... existing properties
+  streamState: null as StreamState | null,
+
+  handleStreamEvent(event: StreamEvent & { offset?: number }) {
+    // Save offset for reconnection
+    if (event.offset !== undefined && this.sessionId) {
+      this.streamState = { sessionId: this.sessionId, lastOffset: event.offset };
+      saveStreamState(this.streamState);
+    }
+
+    // Existing handling...
+    switch (event.type) {
+      case "session":
+        this.sessionId = event.sessionId;
+        break;
+      case "patch":
+        this.applyPatch(event.patch);
+        break;
+      // ... rest
+    }
+  },
+
+  async sendStreamRequest(request: GenerateRequest, isInitial = false) {
+    const saved = loadStreamState();
+
+    const requestWithReconnect = {
+      ...request,
+      sessionId: saved?.sessionId ?? this.sessionId ?? undefined,
+      reconnect: !!saved && !request.prompt && !request.action,
+      fromOffset: saved?.lastOffset,
+    };
+
+    // ... existing fetch logic, but call handleStreamEvent with offset
+  },
+
+  resetSession() {
+    this.sessionId = null;
+    this.stats = null;
+    this.streamState = null;
+    clearStreamState();
+    // ... rest of existing reset
+  },
+
+  async init() {
+    const saved = loadStreamState();
+
+    if (saved) {
+      // Try to reconnect to existing session
+      this.sessionId = saved.sessionId;
+      this.streamState = saved;
+
+      // Connect without action to just subscribe to updates
+      await this.sendStreamRequest({ type: "generate" });
+    } else {
+      // Fresh start
+      this.getElements().contentEl.innerHTML = INITIAL_HTML;
+      this.setLoading(false, true);
+    }
+
+    // ... rest of existing init
+  },
+};
+```
+
+---
+
+## Testing Strategy
+
+### Unit Tests for Processor (Pure Functions)
+
+```typescript
+// processor.test.ts
+import { describe, it, expect } from "vitest";
+import { Effect, Queue, Hub, TestClock, Fiber } from "effect";
+import { runProcessingLoop, reconstructHtml, type ProcessorDeps } from "./processor";
+
+describe("runProcessingLoop", () => {
+  it("processes single action", async () => {
+    const events: StreamEvent[] = [];
+
+    const mockDeps: ProcessorDeps = {
+      appendEvent: (_, event) =>
+        Effect.succeed(events.push(event) - 1), // Return offset
+
+      generateStream: (_) =>
+        Effect.succeed(
+          Stream.fromIterable([
+            { type: "patch", patch: { selector: "#count", text: "1" } },
+            { type: "done", html: "<div>1</div>" },
+          ])
+        ),
+
+      getCurrentHtml: () => Effect.succeed("<div>0</div>"),
+    };
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const queue = yield* Queue.unbounded<Action>();
+        const hub = yield* Hub.unbounded<StreamEventWithOffset>();
+
+        // Start processor in background
+        const fiber = yield* Effect.fork(
+          runProcessingLoop("test-session", queue, hub, mockDeps)
+        );
+
+        // Enqueue an action
+        yield* Queue.offer(queue, { type: "action", action: "increment" });
+
+        // Wait a bit for processing
+        yield* Effect.sleep(Duration.millis(100));
+
+        // Verify events were appended
+        expect(events).toHaveLength(2);
+        expect(events[0].type).toBe("patch");
+        expect(events[1].type).toBe("done");
+
+        // Clean up
+        yield* Fiber.interrupt(fiber);
+      })
+    );
+  });
+
+  it("batches multiple actions", async () => {
+    let capturedRequest: GenerateRequest | null = null;
+
+    const mockDeps: ProcessorDeps = {
+      appendEvent: () => Effect.succeed(0),
+      generateStream: (req) => {
+        capturedRequest = req;
+        return Effect.succeed(Stream.empty);
+      },
+      getCurrentHtml: () => Effect.succeed("<div>0</div>"),
+    };
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const queue = yield* Queue.unbounded<Action>();
+        const hub = yield* Hub.unbounded<StreamEventWithOffset>();
+
+        const fiber = yield* Effect.fork(
+          runProcessingLoop("test-session", queue, hub, mockDeps)
+        );
+
+        // Enqueue multiple actions at once
+        yield* Queue.offer(queue, { type: "action", action: "increment" });
+        yield* Queue.offer(queue, { type: "action", action: "increment" });
+        yield* Queue.offer(queue, { type: "action", action: "increment" });
+
+        yield* Effect.sleep(Duration.millis(100));
+
+        // Should be batched
+        expect(capturedRequest?.action).toBe("batch");
+        expect(capturedRequest?.actionData?.summary).toBe("increment (3x)");
+
+        yield* Fiber.interrupt(fiber);
+      })
+    );
+  });
+});
+
+describe("reconstructHtml", () => {
+  it("returns initial HTML when no events", () => {
+    const result = reconstructHtml(null, [], () => "", "<div>initial</div>");
+    expect(result).toBe("<div>initial</div>");
+  });
+
+  it("uses done event HTML as base", () => {
+    const lastHtmlEvent = {
+      offset: 5,
+      data: JSON.stringify({ type: "done", html: "<div>final</div>" }),
+    };
+
+    const result = reconstructHtml(lastHtmlEvent, [], () => "", "<div>initial</div>");
+    expect(result).toBe("<div>final</div>");
+  });
+
+  it("applies patches after done event", () => {
+    const lastHtmlEvent = {
+      offset: 5,
+      data: JSON.stringify({ type: "done", html: "<div>5</div>" }),
+    };
+
+    const eventsAfter = [
+      { data: JSON.stringify({ type: "patch", patch: { selector: "div", text: "6" } }) },
+    ];
+
+    const mockApplyPatch = (html: string, patch: any) => "<div>6</div>";
+
+    const result = reconstructHtml(lastHtmlEvent, eventsAfter, mockApplyPatch, "<div>0</div>");
+    expect(result).toBe("<div>6</div>");
+  });
+});
+```
+
+---
+
+## Migration
+
+### `drizzle/0003_stream_events.sql`
+
+```sql
+CREATE TABLE IF NOT EXISTS stream_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL,
+  offset INTEGER NOT NULL,
+  event_type TEXT NOT NULL,
+  data TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS stream_events_session_offset_idx
+  ON stream_events(session_id, offset);
+
+CREATE INDEX IF NOT EXISTS stream_events_created_at_idx
+  ON stream_events(created_at);
+```
+
+---
+
+## Implementation Order
+
+1. **Phase 1:** Types and schema (`types.ts`, `schema.ts`, migration)
+2. **Phase 2:** DurableEventLog service (`event-log.ts`)
+3. **Phase 3:** SessionProcessor pure functions (`processor.ts`) + unit tests
+4. **Phase 4:** ProcessorRegistry service (`registry.ts`)
+5. **Phase 5:** Background jobs (`jobs.ts`)
+6. **Phase 6:** RateLimitService (`rate-limit/service.ts`)
+7. **Phase 7:** HTTP handler (`handlers.ts`)
+8. **Phase 8:** Frontend changes (`stream.ts`, `main.ts`)
+9. **Phase 9:** Integration testing

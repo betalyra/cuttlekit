@@ -8,7 +8,7 @@ import {
 } from "drizzle-orm/sqlite-core";
 
 // Vector type definition for Turso/libSQL
-export const EMBEDDING_DIMENSIONS = 768; // text-embedding-004 outputs 768 dimensions
+export const EMBEDDING_DIMENSIONS = 768;
 
 const float32Array = customType<{
   data: number[];
