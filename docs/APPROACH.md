@@ -451,6 +451,16 @@ const UnifiedResponseSchema = z.union([
 
 ---
 
+## Step 23: Durable Streams & Action Batching
+
+**Problem:** When users interact rapidly (e.g., clicking +1 three times while the LLM is still generating), each click triggered a separate LLM call. This was wasteful and caused race conditions with stale HTML state.
+
+**Solution:** Split the single POST endpoint into POST (submit action) + GET (SSE subscribe). Actions queue server-side and batch automatically — if 3 clicks arrive while the LLM is busy, they're dequeued together and handled in a single LLM call with all actions listed chronologically.
+
+**Result:** Rapid interactions are efficient (one LLM call instead of three), SSE connections survive page refresh via offset-based replay, and the system stays consistent under concurrent actions.
+
+---
+
 ## Key Takeaways
 
 1. **Plain HTML over JSX** - AI can steer a responsive frontend by generating plain HTML

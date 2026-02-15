@@ -3,23 +3,41 @@
 ## Overview
 
 ```
-┌─────────────┐     ┌─────────────────────────┐     ┌─────────────┐
-│   Client    │────▶│        Server           │────▶│     LLM     │
-│  (vanilla)  │     │                         │     │             │
-│             │     │  happy-dom (VDOM)       │     │  Patches or │
-│  Render     │◀────│  + patch application    │◀────│  Full HTML  │
-│  Full HTML  │     │  + retry loop           │     │             │
-└─────────────┘     └─────────────────────────┘     └─────────────┘
+Frontend
+  ┌───────────────────────┐     ┌────────────────────────────────────┐
+  │ POST /stream/:sid     │     │ GET /stream/:sid?offset=X&live=sse │
+  │ (fire-and-forget)     │     │ (long-lived SSE via EventSource)   │
+  └──────────┬────────────┘     └─────────────────┬──────────────────┘
+             │                                    │
+═════════════╪════════════════════════════════════╪══════════════════
+             │            Backend                 │
+  ┌──────────▼────────────────────────────────────▼──────────────────┐
+  │                    ProcessorRegistry                             │
+  │              Ref<HashMap<SessionId, SessionProcessor>>           │
+  │                                                                  │
+  │  ┌────────────────────────────────────────────────────────────┐  │
+  │  │              SessionProcessor (per session)                │  │
+  │  │                                                            │  │
+  │  │  ActionQueue ──► Processing Fiber ──► EventPubSub          │  │
+  │  │  Queue<Action>   (dequeue → UIService.generateStream       │  │
+  │  │                   → dual-write each event)                 │  │
+  │  │                       │              │                     │  │
+  │  │                       ▼              ▼                     │  │
+  │  │              DurableEventLog    PubSub.publish()           │  │
+  │  │              (Turso DB)         (in-memory, real-time)     │  │
+  │  └────────────────────────────────────────────────────────────┘  │
+  └──────────────────────────────────────────────────────────────────┘
 ```
 
 ### Flow
 
-1. **Client** (vanilla JS): Sends requests with `data-action` + form data
-2. **Server**: Maintains VDOM per session via happy-dom
-3. **LLM**: Generates patches (for actions) or full HTML (for prompts/initial)
-4. **Server**: Applies patches to VDOM, validates, retries on error
-5. **Server**: Sends full HTML to client
-6. **Client**: Renders via `innerHTML`
+1. **Client** opens long-lived SSE connection via `GET /stream/:sessionId`
+2. **Client** submits actions/prompts via `POST /stream/:sessionId` (fire-and-forget, returns 202)
+3. **Server** queues actions, processing fiber dequeues and batches them
+4. **UIService** calls LLM with current VDOM HTML + batched actions
+5. **LLM** generates JSONL patches (or full HTML for new UIs)
+6. **Server** applies patches to VDOM, dual-writes events to DB + PubSub
+7. **Client** receives patches via SSE, applies to DOM in real-time
 
 ---
 
@@ -27,39 +45,69 @@
 
 | File | Purpose |
 |------|---------|
-| [vdom.ts](apps/backend/src/services/vdom.ts) | VdomService - happy-dom per session, patch application |
-| [generate.ts](apps/backend/src/services/generate.ts) | GenerateService - `generateFullHtml()` + `generatePatches()` |
-| [request-handler.ts](apps/backend/src/services/request-handler.ts) | Routes requests, retry loop, fallback logic |
-| [session.ts](apps/backend/src/services/session.ts) | SessionService - conversation history (recorded, not sent to LLM) |
-| [main.ts](apps/webpage/src/main.ts) | Client - vanilla JS, event delegation |
+| [stream.ts](packages/common/src/stream.ts) | Shared Action + StreamEvent types (Effect Schema) |
+| [api.ts](apps/backend/src/api.ts) | HTTP endpoints: POST submit + GET SSE subscribe |
+| [registry.ts](apps/backend/src/services/durable/registry.ts) | ProcessorRegistry - lazy creation, dormancy management |
+| [processor.ts](apps/backend/src/services/durable/processor.ts) | Processing loop - dequeue, batch, generate, dual-write |
+| [event-log.ts](apps/backend/src/services/durable/event-log.ts) | DurableEventLog - Turso DB persistence for replay |
+| [jobs.ts](apps/backend/src/services/durable/jobs.ts) | Background jobs - dormancy checker, event cleanup |
+| [ui.ts](apps/backend/src/services/ui.ts) | UIService - session resolution, VDOM orchestration, memory |
+| [service.ts](apps/backend/src/services/generate/service.ts) | GenerateService - LLM streaming with retry loop |
+| [vdom/](apps/backend/src/services/vdom/) | VdomService - happy-dom per session, patch application |
+| [main.ts](apps/webpage/src/main.ts) | Client - EventSource SSE + fetch POST, event delegation |
 
 ---
 
-## Request Routing
+## Endpoint Design
 
-| Condition | Action |
-|-----------|--------|
-| No VDOM (new session) | Generate full HTML |
-| Has prompt | Generate full HTML (with current HTML for style preservation) |
-| `action="generate"` | Generate full HTML |
-| `action="reset"` | Clear VDOM, generate fresh HTML |
-| Other actions | Generate patches → apply → retry on error → fallback to full HTML |
+### `POST /stream/:sessionId` — Submit Action
+- Pushes action into the session's `Queue<Action>`
+- Returns `202 Accepted` immediately
+- Creates SessionProcessor lazily via `getOrCreate`
+
+### `GET /stream/:sessionId?offset=X&live=sse` — Subscribe to Events
+- Subscribes to the session's `PubSub<StreamEventWithOffset>`
+- Optional `offset` query param for catch-up replay from DB
+- Returns long-lived SSE stream with `id:` field set to offset
+
+---
+
+## Action Batching
+
+When the LLM is busy generating, incoming actions queue up. The processing fiber uses `Queue.takeBetween(1, 10)` to dequeue all waiting actions at once and passes them as a numbered chronological list in the LLM prompt:
+
+```
+[NOW]
+1. Action: increment Data: {}
+2. Action: increment Data: {}
+3. Action: increment Data: {}
+```
+
+One LLM call handles all three instead of triggering three separate generations.
+
+---
+
+## Reconnection (Subscribe-First-Then-Replay)
+
+When a client reconnects with `?offset=5`:
+
+1. Subscribe to PubSub **first** (buffered)
+2. Read DB: events after offset 5 → e.g., events 6, 7, 8
+3. Stream DB events first (catch-up)
+4. Drain PubSub, filter `offset <= 8` (dedup)
+5. Continue streaming live events
+
+No gaps, no duplicates.
 
 ---
 
 ## Patch Format
 
-LLM generates CSS selector-based patches (must use ID selectors):
+LLM generates JSONL with CSS selector-based patches (ID selectors only):
 
 ```json
-[
-  { "selector": "#counter-value", "text": "42" },
-  { "selector": "#status", "attr": { "class": "online" } },
-  { "selector": "#todo-1-checkbox", "attr": { "checked": "checked" } },
-  { "selector": "#todo-2-checkbox", "attr": { "checked": null } },
-  { "selector": "#todo-list", "append": "<li id=\"todo-4\">New item</li>" },
-  { "selector": "#todo-3", "remove": true }
-]
+{"type":"patches","patches":[{"selector":"#counter-value","text":"42"}]}
+{"type":"patches","patches":[{"selector":"#todo-list","append":"<li id='todo-4'>New</li>"}]}
 ```
 
 ### Supported Operations
@@ -82,27 +130,26 @@ LLM generates CSS selector-based patches (must use ID selectors):
 
 ---
 
-## HTML Generation Requirements
+## Interactivity
 
-### Unique IDs (Critical)
-
-All interactive elements must have unique IDs for the patch system:
+No JavaScript/onclick in generated HTML. All interaction is declarative via `data-action`:
 
 ```html
-<input type="checkbox" id="todo-1-checkbox" data-action="toggle" data-action-data="{&quot;id&quot;:&quot;1&quot;}">
-<li id="todo-1">...</li>
-<button id="delete-1" data-action="delete" data-action-data="{&quot;id&quot;:&quot;1&quot;}">Delete</button>
+<button id="inc-btn" data-action="increment">+</button>
+<input id="filter" data-action="filter">
+<select id="sort" data-action="sort"><option value="asc">Asc</option></select>
 ```
 
-### Escape Hatch (Required)
+Client intercepts interactions, sends them as POST actions. Server tells LLM what happened, LLM generates patches.
 
-Every generated UI must include one of:
-1. Prompt input (`id="prompt"`) + Generate button (`data-action="generate"`)
-2. Reset button (`data-action="reset"`)
+---
 
-### Style Preservation
+## Session Lifecycle
 
-When user prompts modify existing UI, the current HTML is passed to the LLM with instructions to preserve existing design, layout, and style.
+1. **Fresh session**: Client generates `sessionId` via `crypto.randomUUID()`, opens SSE, submits first prompt
+2. **Active**: Processing fiber consumes actions, generates patches, dual-writes
+3. **Idle**: No actions for 5 minutes → dormancy checker releases processor (fiber interrupted, resources freed)
+4. **Reconnect**: New processor created lazily, state replayed from DB
 
 ---
 
@@ -114,76 +161,22 @@ When user prompts modify existing UI, the current HTML is passed to the LLM with
 | Add todo item | ~2000 tokens | ~100 tokens |
 | Toggle checkbox | ~2000 tokens | ~30 tokens |
 
-The win is **LLM generation time**, not network size.
-
----
-
-## History Management
-
-### Current Implementation (Quick Win)
-
-- History is **recorded** in SessionService for future use
-- History is **NOT sent** to LLM for patch generation
-- Current HTML serves as the complete state
-- Action + actionData tells LLM what to do
-
-### Rationale
-
-For generative UI, **the current HTML IS the state**:
-- No need for history to understand UI state
-- Action data contains all necessary context
-- Reduces token usage by 50-80%
-
-### Future: Rolling Summary
-
-Planned tiered compression system:
-
-```typescript
-type RollingSummary = {
-  originalRequest: string      // "user requested a todo app"
-  keyFeatures: string[]        // ["todo list", "add/delete", "counter"]
-  recentChanges: string[]      // ["added 3 todos", "deleted todo-2"]
-  userPreferences: string[]    // ["dark mode", "minimal design"]
-}
-```
+**Current HTML IS the state** - no conversation history sent to LLM. Action + current HTML is all context needed.
 
 ---
 
 ## Retry & Fallback
 
-1. Generate patches for action
-2. Apply patches to VDOM
-3. If errors: retry up to 2 times with error feedback
-4. If still failing: fallback to full HTML generation
-
-Error feedback is included in retry prompts:
-```
-YOUR PREVIOUS PATCHES FAILED:
-Element not found: #nonexistent
-
-Please generate corrected patches.
-```
+1. Stream patches from LLM, validate each against temporary DOM
+2. On error: stop streaming, capture successful patches, retry with corrective prompt
+3. Up to 3 retries with error context
+4. Full HTML fallback if patches remain broken
 
 ---
 
-## Implementation Status
+## Memory System
 
-### Completed
-
-- [x] VDOM architecture with happy-dom
-- [x] Patch generation with ID-based selectors
-- [x] Retry loop with error feedback
-- [x] Fallback to full HTML
-- [x] Escape hatch (reset/generate buttons)
-- [x] Style preservation for prompts
-- [x] History recording (not sent to LLM)
-- [x] Unique ID requirements in prompts
-- [x] HTML entity encoding for JSON in attributes
-- [x] Boolean attribute handling (null to remove)
-
-### Pending
-
-- [ ] Rolling summary for history compaction
-- [ ] Streaming for perceived speed
-- [ ] Session cleanup/garbage collection
-- [ ] Token usage metrics
+- **Semantic memory** via SQLite/Turso with vector embeddings
+- LLM-generated summaries of prompts, actions, and changes
+- Background queue for async processing (non-blocking)
+- Vector search for relevant past interactions
