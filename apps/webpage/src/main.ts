@@ -19,7 +19,14 @@ type StreamEvent =
   | { type: "session"; sessionId: string; offset: number }
   | { type: "patch"; patch: Patch; offset: number }
   | { type: "html"; html: string; offset: number }
-  | { type: "stats"; cacheRate: number; tokensPerSecond: number; mode: "patches" | "full"; patchCount: number; offset: number }
+  | {
+      type: "stats";
+      cacheRate: number;
+      tokensPerSecond: number;
+      mode: "patches" | "full";
+      patchCount: number;
+      offset: number;
+    }
   | { type: "done"; html: string; offset: number };
 
 type StreamState = {
@@ -51,7 +58,12 @@ const app = {
   eventSource: null as EventSource | null,
   lastOffset: -1,
   loading: false,
-  stats: null as { cacheRate: number; tokensPerSecond: number; mode: "patches" | "full"; patchCount: number } | null,
+  stats: null as {
+    cacheRate: number;
+    tokensPerSecond: number;
+    mode: "patches" | "full";
+    patchCount: number;
+  } | null,
 
   getElements() {
     return {
@@ -136,9 +148,10 @@ const app = {
   updateStats() {
     const { statsEl } = this.getElements();
     if (this.stats) {
-      const modeDisplay = this.stats.mode === "patches"
-        ? `${this.stats.patchCount} patches`
-        : "full";
+      const modeDisplay =
+        this.stats.mode === "patches"
+          ? `${this.stats.patchCount} patches`
+          : "full";
       statsEl.innerHTML = `
         <span title="Generation mode">${modeDisplay}</span>
         <span class="text-[#a3a3a3]">·</span>
@@ -155,7 +168,16 @@ const app = {
   handleStreamEvent(event: StreamEvent) {
     switch (event.type) {
       case "session":
-        this.sessionId = event.sessionId;
+        // Stream session ID is informational once we already established one.
+        // Keeping the existing ID avoids accidentally switching POSTs to a
+        // different session while SSE is still attached to the current stream.
+        if (!this.sessionId) {
+          this.sessionId = event.sessionId;
+        } else if (this.sessionId !== event.sessionId) {
+          console.warn(
+            `Ignoring mismatched session event. current=${this.sessionId} event=${event.sessionId}`,
+          );
+        }
         break;
       case "patch":
         this.applyPatch(event.patch);
@@ -189,7 +211,7 @@ const app = {
         JSON.stringify({
           sessionId: this.sessionId,
           lastOffset: this.lastOffset,
-        })
+        }),
       );
     }
   },
@@ -203,7 +225,13 @@ const app = {
     const url = `${API_BASE}/stream/${sessionId}?${params}`;
     this.eventSource = new EventSource(url);
 
-    for (const eventType of ["session", "patch", "html", "stats", "done"] as const) {
+    for (const eventType of [
+      "session",
+      "patch",
+      "html",
+      "stats",
+      "done",
+    ] as const) {
       this.eventSource.addEventListener(eventType, (e) => {
         const event = JSON.parse((e as MessageEvent).data) as StreamEvent;
         this.lastOffset = event.offset;
@@ -223,11 +251,6 @@ const app = {
     actionData?: Record<string, unknown>;
     currentHtml?: string;
   }) {
-    if (!this.sessionId) {
-      this.sessionId = crypto.randomUUID();
-      this.connectSSE(this.sessionId);
-    }
-
     this.setLoading(true);
     this.setError(null);
 
@@ -239,7 +262,8 @@ const app = {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...request,
-          currentHtml: currentHtml && currentHtml.trim() ? currentHtml : undefined,
+          currentHtml:
+            currentHtml && currentHtml.trim() ? currentHtml : undefined,
         }),
       });
       // Response is 202 — results arrive via SSE
@@ -296,12 +320,16 @@ const app = {
   },
 
   resetSession() {
-    this.sessionId = null;
-    this.lastOffset = -1;
-    this.stats = null;
     if (this.eventSource) this.eventSource.close();
     this.eventSource = null;
+    this.lastOffset = -1;
+    this.stats = null;
     localStorage.removeItem(STORAGE_KEY);
+
+    // Immediately create a fresh session with an open SSE connection
+    this.sessionId = crypto.randomUUID();
+    this.connectSSE(this.sessionId);
+
     this.getElements().contentEl.innerHTML = INITIAL_HTML;
     this.getElements().promptInput.value = "";
     this.updateStats();
@@ -311,17 +339,19 @@ const app = {
   init() {
     const { promptInput, sendBtn, resetBtn, contentEl } = this.getElements();
 
-    // Check for existing session to reconnect
+    // Restore or create a session, then open the SSE connection immediately
+    // so it's already live when the first POST fires.
     const saved = loadStreamState();
     if (saved) {
       this.sessionId = saved.sessionId;
       this.lastOffset = saved.lastOffset;
       this.setLoading(true);
-      this.connectSSE(saved.sessionId);
     } else {
+      this.sessionId = crypto.randomUUID();
       contentEl.innerHTML = INITIAL_HTML;
       this.setLoading(false, true);
     }
+    this.connectSSE(this.sessionId);
 
     // Footer: Send button
     sendBtn.addEventListener("click", () => this.sendPrompt());
@@ -355,7 +385,7 @@ const app = {
       const target = e.target as HTMLElement;
       if (
         target.matches(
-          "input[data-action], select[data-action], textarea[data-action]"
+          "input[data-action], select[data-action], textarea[data-action]",
         )
       ) {
         this.triggerAction(target);
