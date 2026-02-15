@@ -207,9 +207,9 @@ Generate:
           // 4. Store in database
           yield* store.insertMemoryEntry({
             sessionId: op.sessionId,
-            prompts: op.prompts ? JSON.stringify(op.prompts) : null,
+            prompts: op.prompts ?? null,
             promptSummary,
-            actions: op.actions ? JSON.stringify(op.actions) : null,
+            actions: op.actions ?? null,
             actionSummary,
             changeSummary,
             patchCount: getPatchCount(op.change),
