@@ -298,16 +298,27 @@ const app = {
     this.submitAction({ prompt });
   },
 
-  resetSession() {
+  async createSession(): Promise<string> {
+    const res = await fetch(`${API_BASE}/sessions`, { method: "POST" });
+    if (!res.ok) throw new Error(`Session creation failed: ${res.status}`);
+    const data = await res.json();
+    return data.sessionId;
+  },
+
+  async resetSession() {
     if (this.eventSource) this.eventSource.close();
     this.eventSource = null;
     this.lastOffset = -1;
     this.stats = null;
     localStorage.removeItem(STORAGE_KEY);
 
-    // Immediately create a fresh session with an open SSE connection
-    this.sessionId = crypto.randomUUID();
-    this.connectSSE(this.sessionId);
+    try {
+      this.sessionId = await this.createSession();
+      this.connectSSE(this.sessionId);
+    } catch (err) {
+      this.setError(err instanceof Error ? err.message : String(err));
+      return;
+    }
 
     this.getElements().contentEl.innerHTML = INITIAL_HTML;
     this.getElements().promptInput.value = "";
@@ -315,18 +326,21 @@ const app = {
     this.getElements().promptInput.focus();
   },
 
-  init() {
+  async init() {
     const { promptInput, sendBtn, resetBtn, contentEl } = this.getElements();
 
-    // Restore or create a session, then open the SSE connection immediately
-    // so it's already live when the first POST fires.
     const saved = loadStreamState();
     if (saved) {
       this.sessionId = saved.sessionId;
       this.lastOffset = saved.lastOffset;
       this.setLoading(true);
     } else {
-      this.sessionId = crypto.randomUUID();
+      try {
+        this.sessionId = await this.createSession();
+      } catch (err) {
+        this.setError(err instanceof Error ? err.message : String(err));
+        return;
+      }
       contentEl.innerHTML = INITIAL_HTML;
       this.setLoading(false, true);
     }
@@ -402,4 +416,4 @@ const app = {
 };
 
 // Start the app
-app.init();
+app.init().catch(console.error);

@@ -21,15 +21,10 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
 
     const resolveSession = (request: UIRequest) =>
       Effect.gen(function* () {
-        // Get or create session (handles ID generation via cuid2)
         const session = yield* sessionService.getOrCreateSession(
           request.sessionId,
         );
-        // Use the stable durable session ID for VDOM when provided,
-        // otherwise fall back to the internal session ID.
-        // This ensures consecutive calls from the same durable session
-        // share the same VDOM state.
-        const sessionId = request.sessionId ?? session.id;
+        const sessionId = session.id;
 
         // Use most recent action's currentHtml as fallback
         const clientHtml = [...request.actions]
