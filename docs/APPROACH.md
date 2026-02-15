@@ -461,6 +461,22 @@ const UnifiedResponseSchema = z.union([
 
 ---
 
+## Step 24: Server-Owned Session IDs
+
+**Problem:** The client generated UUIDs via `crypto.randomUUID()` for session IDs. The backend's `SessionService` created sessions with cuid2 IDs. These never matched — `resolveSession` used the client UUID for VDOM/memory, while the `sessions` table had a different cuid2 ID. This caused FK violations in `session_memory_entries`, a new orphaned session on every request, and double JSON encoding of `prompts`/`actions` columns.
+
+**Solution:**
+- Added `POST /sessions` endpoint — the backend now owns session creation and returns a cuid2
+- Frontend calls this on init/reset instead of `crypto.randomUUID()`
+- `resolveSession` always uses `session.id` (not `request.sessionId`)
+- Fixed double JSON encoding: Drizzle's `mode: "json"` auto-serializes, so removed manual `JSON.stringify` calls
+
+**Trade-off:** Extra round trip on first load to create a session. Negligible in practice since no events are expected until the first user action.
+
+**Result:** Single consistent session ID (cuid2) across ProcessorRegistry, VDOM, memory entries, and event log. Memory operations no longer fail with FK violations.
+
+---
+
 ## Key Takeaways
 
 1. **Plain HTML over JSX** - AI can steer a responsive frontend by generating plain HTML
@@ -472,3 +488,4 @@ const UnifiedResponseSchema = z.union([
 7. **Separate prompt/action history** - Maximizes cache hits by keeping prompts as stable prefix
 8. **Fail-fast with corrective retry** - Validate patches during streaming, retry with error context if invalid
 9. **Background queues for expensive operations** - Memory summarization and embedding runs async, doesn't block UI
+10. **Server owns identity** - Session IDs must be generated server-side to avoid mismatches between client-provided IDs and database records

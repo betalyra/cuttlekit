@@ -14,6 +14,7 @@ import {
   type StreamEvent,
   type StreamEventWithOffset,
 } from "./services/durable/index.js";
+import { SessionService } from "./services/session.js";
 
 // ============================================================
 // SSE formatting
@@ -39,6 +40,16 @@ export const api = HttpApi.make("api")
         }),
         { status: 202 }
       )
+    )
+  )
+  .add(
+    HttpApiGroup.make("sessions").add(
+      HttpApiEndpoint.post("create-session", "/sessions")
+        .addSuccess(
+          Schema.Struct({ sessionId: Schema.String }),
+          { status: 201 }
+        )
+        .addError(HttpApiError.InternalServerError)
     )
   )
   .add(
@@ -77,6 +88,25 @@ export const healthGroupLive = HttpApiBuilder.group(
       Effect.succeed({
         status: "ok",
       })
+    )
+);
+
+// ============================================================
+// Sessions group handlers
+// ============================================================
+
+export const sessionsGroupLive = HttpApiBuilder.group(
+  api,
+  "sessions",
+  (handlers) =>
+    handlers.handle("create-session", () =>
+      Effect.gen(function* () {
+        const sessionService = yield* SessionService;
+        const session = yield* sessionService.createSession();
+        return { sessionId: session.id };
+      }).pipe(
+        Effect.mapError(() => new HttpApiError.InternalServerError())
+      )
     )
 );
 

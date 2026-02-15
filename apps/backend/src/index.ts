@@ -3,7 +3,7 @@ import { NodeHttpServer, NodeRuntime, NodeFileSystem, NodePath } from "@effect/p
 import { Config, Effect, Layer, Logger, LogLevel } from "effect";
 import { createServer } from "node:http";
 
-import { api, healthGroupLive, streamGroupLive } from "./api.js";
+import { api, healthGroupLive, sessionsGroupLive, streamGroupLive } from "./api.js";
 import { GenerateService, PromptLogger } from "./services/generate/index.js";
 import {
   GroqLanguageModelLayer,
@@ -114,7 +114,9 @@ const BackgroundJobs = Layer.effectDiscard(
 // Compose API layers
 const ApiLive = HttpApiBuilder.api(api).pipe(
   Layer.provide(healthGroupLive),
+  Layer.provide(sessionsGroupLive),
   Layer.provide(streamGroupLive),
+  Layer.provide(SessionWithDeps),
   Layer.provide(RegistryWithDeps),
   Layer.provide(EventLogWithDeps),
   Layer.provide(BackgroundJobs),
