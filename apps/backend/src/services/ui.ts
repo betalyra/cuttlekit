@@ -4,13 +4,11 @@ import { MemoryService, type MemoryChange } from "./memory/index.js";
 import { SessionService } from "./session.js";
 import { VdomService, type Patch } from "./vdom/index.js";
 import type { UserAction } from "../types/messages.js";
+import type { Action } from "./durable/types.js";
 
 export type UIRequest = {
   sessionId?: string;
-  currentHtml?: string;
-  prompt?: string;
-  action?: string;
-  actionData?: Record<string, unknown>;
+  actions: readonly Action[];
 };
 
 export class UIService extends Effect.Service<UIService>()("UIService", {
@@ -29,10 +27,15 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
         );
         const sessionId = session.id;
 
+        // Use most recent action's currentHtml as fallback
+        const clientHtml = [...request.actions]
+          .reverse()
+          .find((a) => a.currentHtml)?.currentHtml;
+
         // Get current VDOM HTML (null if new session)
         // Fall back to client-provided HTML if server doesn't have VDOM (e.g., after restart)
         const serverHtml = yield* vdomService.getHtml(sessionId);
-        const currentHtml = serverHtml ?? request.currentHtml ?? null;
+        const currentHtml = serverHtml ?? clientHtml ?? null;
 
         // If client provided HTML but server didn't have it, restore the VDOM
         if (!serverHtml && currentHtml) {
@@ -50,20 +53,47 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
       | { type: "stats"; cacheRate: number; tokensPerSecond: number; mode: "patches" | "full"; patchCount: number }
       | { type: "done"; html: string };
 
+    // Extract prompts and actions from the actions array
+    const extractFromActions = (actions: readonly Action[]) => {
+      const prompts = actions
+        .filter((a) => a.type === "prompt" && a.prompt)
+        .map((a) => a.prompt!);
+      const userActions = actions
+        .filter((a) => a.type === "action" && a.action)
+        .map(
+          (a) =>
+            ({
+              action: a.action!,
+              data: a.actionData,
+            }) as UserAction,
+        );
+
+      // Compose prompt from all prompts and actions
+      const prompt = prompts.length > 0 ? prompts.join("\n") : undefined;
+      const action = userActions.length > 0 ? userActions[0].action : undefined;
+      const actionData =
+        userActions.length > 0
+          ? (userActions[0].data as Record<string, unknown> | undefined)
+          : undefined;
+
+      return { prompts, userActions, prompt, action, actionData };
+    };
+
     const generateStream = (request: UIRequest) =>
       Effect.gen(function* () {
         const { sessionId, currentHtml } = yield* resolveSession(request);
-        const prompt =
-          request.prompt || (request.actionData?.prompt as string | undefined);
+        const { prompts, userActions, prompt, action, actionData } =
+          extractFromActions(request.actions);
 
         yield* Effect.log("UIService.generateStream", {
-          action: request.action,
+          action,
           prompt,
+          actionCount: request.actions.length,
           hasCurrentHtml: !!currentHtml,
         });
 
         // Handle "reset" action - clear VDOM before generation
-        const isResetAction = request.action === "reset";
+        const isResetAction = action === "reset";
         if (isResetAction) {
           yield* vdomService.deleteSession(sessionId);
           yield* Effect.log("Session reset, generating fresh UI");
@@ -74,8 +104,8 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
           sessionId,
           currentHtml: isResetAction ? undefined : (currentHtml ?? undefined),
           prompt,
-          action: request.action,
-          actionData: request.actionData,
+          action,
+          actionData,
         });
 
         // Start with session event
@@ -161,15 +191,8 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
             if (memoryChange) {
               yield* memoryService.saveMemory({
                 sessionId,
-                prompts: prompt ? [prompt] : undefined,
-                actions: request.action
-                  ? [
-                      {
-                        action: request.action,
-                        data: request.actionData,
-                      } as UserAction,
-                    ]
-                  : undefined,
+                prompts: prompts.length > 0 ? prompts : undefined,
+                actions: userActions.length > 0 ? userActions : undefined,
                 change: memoryChange,
               });
             }

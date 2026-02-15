@@ -42,16 +42,16 @@
     ]
   },
   "dependencies": {
-    "@ai-sdk/google": "3.0.22",
-    "@ai-sdk/groq": "3.0.22",
+    "@ai-sdk/google": "3.0.29",
+    "@ai-sdk/groq": "3.0.24",
     "@ai-sdk/provider": "3.0.8",
-    "@ai-sdk/provider-utils": "^4.0.14",
-    "@effect/platform": "^0.94.3",
+    "@ai-sdk/provider-utils": "^4.0.15",
+    "@effect/platform": "^0.94.5",
     "@effect/platform-node": "^0.104.1",
     "@paralleldrive/cuid2": "^3.3.0",
-    "ai": "6.0.77",
-    "effect": "^3.19.16",
-    "happy-dom": "^20.5.0",
+    "ai": "6.0.86",
+    "effect": "^3.19.17",
+    "happy-dom": "^20.6.1",
     "tsdown": "^0.20.3",
     "zod": "^4.3.6"
   }

@@ -4,6 +4,7 @@ import {
   sqliteTable,
   integer,
   text,
+  index,
   customType,
 } from "drizzle-orm/sqlite-core";
 
@@ -65,8 +66,30 @@ export const sessionMemoryEntries = sqliteTable("session_memory_entries", {
   createdAt: integer("created_at").notNull(),
 });
 
+// Stream events - durable event log for reconnectable streams
+export const streamEvents = sqliteTable(
+  "stream_events",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    sessionId: text("session_id").notNull(),
+    offset: integer("offset").notNull(),
+    eventType: text("event_type").notNull(),
+    data: text("data").notNull(), // JSON-serialized StreamEvent
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    index("stream_events_session_offset_idx").on(
+      table.sessionId,
+      table.offset
+    ),
+    index("stream_events_created_at_idx").on(table.createdAt),
+  ]
+);
+
 // Type exports
 export type Session = typeof sessions.$inferSelect;
 export type NewSession = typeof sessions.$inferInsert;
 export type SessionMemoryEntry = typeof sessionMemoryEntries.$inferSelect;
 export type NewSessionMemoryEntry = typeof sessionMemoryEntries.$inferInsert;
+export type StreamEventRow = typeof streamEvents.$inferSelect;
+export type NewStreamEventRow = typeof streamEvents.$inferInsert;
