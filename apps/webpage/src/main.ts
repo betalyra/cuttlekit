@@ -2,14 +2,8 @@ import "./style.css";
 import { loadFontsFromHTML } from "./fonts";
 import { loadIconsFromHTML } from "./icons";
 
-type GenerateRequest = {
-  type: "generate";
-  prompt?: string;
-  sessionId?: string;
-  action?: string;
-  actionData?: Record<string, unknown>;
-  currentHtml?: string;
-};
+const API_BASE = "http://localhost:34512";
+const STORAGE_KEY = "generative-ui-stream";
 
 // Patch types matching backend
 type Patch =
@@ -22,14 +16,18 @@ type Patch =
 
 // Stream event types
 type StreamEvent =
-  | { type: "session"; sessionId: string }
-  | { type: "patch"; patch: Patch }
-  | { type: "html"; html: string }
-  | { type: "stats"; cacheRate: number; tokensPerSecond: number; mode: "patches" | "full"; patchCount: number }
-  | { type: "done"; html: string };
+  | { type: "session"; sessionId: string; offset: number }
+  | { type: "patch"; patch: Patch; offset: number }
+  | { type: "html"; html: string; offset: number }
+  | { type: "stats"; cacheRate: number; tokensPerSecond: number; mode: "patches" | "full"; patchCount: number; offset: number }
+  | { type: "done"; html: string; offset: number };
 
-// Initial intro HTML - sent as currentHtml on first request
-// IMPORTANT: Must have id="root" so LLM can always target it for patches
+type StreamState = {
+  sessionId: string;
+  lastOffset: number;
+};
+
+// Initial intro HTML
 const INITIAL_HTML = `<div id="root" class="flex items-center justify-center min-h-[calc(100vh-4rem)]">
   <div class="text-center max-w-md px-4">
     <h1 class="text-2xl font-light text-[#0a0a0a] mb-4">Generative UI</h1>
@@ -39,8 +37,19 @@ const INITIAL_HTML = `<div id="root" class="flex items-center justify-center min
   </div>
 </div>`;
 
+const loadStreamState = (): StreamState | null => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as StreamState) : null;
+  } catch {
+    return null;
+  }
+};
+
 const app = {
   sessionId: null as string | null,
+  eventSource: null as EventSource | null,
+  lastOffset: -1,
   loading: false,
   stats: null as { cacheRate: number; tokensPerSecond: number; mode: "patches" | "full"; patchCount: number } | null,
 
@@ -61,15 +70,12 @@ const app = {
     this.loading = loading;
     const { loadingEl, contentEl } = this.getElements();
 
-    // Only show full loading screen on initial load (no content yet)
-    // For subsequent requests, keep content visible (smoother UX)
     if (isInitial) {
       loadingEl.style.display = loading ? "flex" : "none";
       contentEl.style.display = loading ? "none" : "block";
     } else {
       loadingEl.style.display = "none";
       contentEl.style.display = "block";
-      // Could add a subtle loading indicator here (e.g., opacity, spinner overlay)
       contentEl.style.opacity = loading ? "0.7" : "1";
     }
   },
@@ -85,7 +91,6 @@ const app = {
     }
   },
 
-  // Extract HTML content from a patch for font loading
   extractPatchContent(patch: Patch): string | null {
     if ("html" in patch) return patch.html;
     if ("append" in patch) return patch.append;
@@ -94,7 +99,6 @@ const app = {
     return null;
   },
 
-  // Apply a single patch to the DOM
   applyPatch(patch: Patch) {
     const el = document.querySelector(patch.selector);
     if (!el) {
@@ -102,7 +106,6 @@ const app = {
       return;
     }
 
-    // Load fonts and icons from patch content
     const content = this.extractPatchContent(patch);
     if (content) {
       loadFontsFromHTML(content);
@@ -172,85 +175,78 @@ const app = {
         this.updateStats();
         break;
       case "done":
-        // Final state - stream complete
+        this.setLoading(false);
         loadFontsFromHTML(event.html);
         loadIconsFromHTML(event.html);
         break;
     }
   },
 
-  // Stream request using SSE for real-time patch updates
-  async sendStreamRequest(request: GenerateRequest, isInitial = false) {
-    try {
-      this.setLoading(true, isInitial);
-      this.setError(null);
-
-      const currentHtml = this.getElements().contentEl.innerHTML || undefined;
-
-      const requestWithSession = {
-        ...request,
-        sessionId: this.sessionId || undefined,
-        currentHtml:
-          currentHtml && currentHtml.trim() ? currentHtml : undefined,
-      };
-
-      const response = await fetch("http://localhost:34512/generate/stream", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(requestWithSession),
-      });
-
-      if (!response.ok) {
-        throw new Error("Failed to start stream");
-      }
-
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error("No response body");
-
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let currentEvent = "";
-      let currentData = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-
-        // Parse SSE events from buffer
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || ""; // Keep incomplete line in buffer
-
-        for (const line of lines) {
-          if (line.startsWith("event: ")) {
-            currentEvent = line.slice(7);
-          } else if (line.startsWith("data: ")) {
-            currentData = line.slice(6);
-          } else if (line === "" && currentEvent && currentData) {
-            // End of event - process it
-            try {
-              const event = JSON.parse(currentData) as StreamEvent;
-              this.handleStreamEvent(event);
-            } catch (e) {
-              console.error("Failed to parse SSE event:", currentData);
-            }
-            currentEvent = "";
-            currentData = "";
-          }
-        }
-      }
-    } catch (err) {
-      this.setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      this.setLoading(false, isInitial);
+  saveStreamState() {
+    if (this.sessionId) {
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({
+          sessionId: this.sessionId,
+          lastOffset: this.lastOffset,
+        })
+      );
     }
   },
 
-  async sendRequest(request: GenerateRequest, isInitial = false) {
-    // Always use unified streaming endpoint for all requests
-    // This ensures history/caching optimization is used consistently
-    return this.sendStreamRequest(request, isInitial);
+  connectSSE(sessionId: string) {
+    if (this.eventSource) this.eventSource.close();
+
+    const params = new URLSearchParams();
+    if (this.lastOffset >= 0) params.set("offset", String(this.lastOffset));
+
+    const url = `${API_BASE}/stream/${sessionId}?${params}`;
+    this.eventSource = new EventSource(url);
+
+    for (const eventType of ["session", "patch", "html", "stats", "done"] as const) {
+      this.eventSource.addEventListener(eventType, (e) => {
+        const event = JSON.parse((e as MessageEvent).data) as StreamEvent;
+        this.lastOffset = event.offset;
+        this.saveStreamState();
+        this.handleStreamEvent(event);
+      });
+    }
+
+    this.eventSource.onerror = () => {
+      // EventSource auto-reconnects with Last-Event-ID
+    };
+  },
+
+  async submitAction(request: {
+    prompt?: string;
+    action?: string;
+    actionData?: Record<string, unknown>;
+    currentHtml?: string;
+  }) {
+    if (!this.sessionId) {
+      this.sessionId = crypto.randomUUID();
+      this.connectSSE(this.sessionId);
+    }
+
+    this.setLoading(true);
+    this.setError(null);
+
+    const currentHtml = this.getElements().contentEl.innerHTML || undefined;
+
+    try {
+      await fetch(`${API_BASE}/stream/${this.sessionId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...request,
+          currentHtml: currentHtml && currentHtml.trim() ? currentHtml : undefined,
+        }),
+      });
+      // Response is 202 — results arrive via SSE
+    } catch (err) {
+      this.setError(err instanceof Error ? err.message : String(err));
+      this.setLoading(false);
+    }
   },
 
   collectFormData(): Record<string, unknown> {
@@ -284,30 +280,28 @@ const app = {
     const actionData = actionDataAttr ? JSON.parse(actionDataAttr) : {};
     const mergedData = { ...formData, ...actionData };
 
-    this.sendRequest({
-      type: "generate",
+    this.submitAction({
       action: action || undefined,
       actionData: Object.keys(mergedData).length > 0 ? mergedData : undefined,
     });
   },
 
-  // Send prompt from the fixed footer
   sendPrompt() {
     const { promptInput } = this.getElements();
     const prompt = promptInput.value.trim();
     if (!prompt) return;
 
     promptInput.value = "";
-    this.sendRequest({
-      type: "generate",
-      prompt,
-    });
+    this.submitAction({ prompt });
   },
 
-  // Reset session and start fresh
   resetSession() {
     this.sessionId = null;
+    this.lastOffset = -1;
     this.stats = null;
+    if (this.eventSource) this.eventSource.close();
+    this.eventSource = null;
+    localStorage.removeItem(STORAGE_KEY);
     this.getElements().contentEl.innerHTML = INITIAL_HTML;
     this.getElements().promptInput.value = "";
     this.updateStats();
@@ -317,9 +311,17 @@ const app = {
   init() {
     const { promptInput, sendBtn, resetBtn, contentEl } = this.getElements();
 
-    // Show initial intro HTML immediately (no AI request needed)
-    contentEl.innerHTML = INITIAL_HTML;
-    this.setLoading(false, true);
+    // Check for existing session to reconnect
+    const saved = loadStreamState();
+    if (saved) {
+      this.sessionId = saved.sessionId;
+      this.lastOffset = saved.lastOffset;
+      this.setLoading(true);
+      this.connectSSE(saved.sessionId);
+    } else {
+      contentEl.innerHTML = INITIAL_HTML;
+      this.setLoading(false, true);
+    }
 
     // Footer: Send button
     sendBtn.addEventListener("click", () => this.sendPrompt());
@@ -338,7 +340,6 @@ const app = {
     // Click handler for buttons/links with data-action (not form inputs)
     document.addEventListener("click", (e) => {
       const target = e.target as HTMLElement;
-      // Skip if clicking on a form input or footer elements
       if (target.matches("input, select, textarea")) return;
       if (target.closest("#prompt-footer")) return;
 
@@ -364,25 +365,21 @@ const app = {
     // Enter key handler for AI-generated inputs
     document.addEventListener("keydown", (e) => {
       const target = e.target as HTMLElement;
-      // Skip the fixed footer prompt input (handled separately)
       if (target.id === "prompt-input") return;
 
       const isInput = target instanceof HTMLInputElement;
       const isTextarea = target instanceof HTMLTextAreaElement;
 
       if (e.key === "Enter" && (isInput || isTextarea)) {
-        // Textarea needs Ctrl/Cmd+Enter
         if (isTextarea && !e.ctrlKey && !e.metaKey) return;
 
         e.preventDefault();
 
-        // Check if input itself has data-action
         if (target.hasAttribute("data-action")) {
           this.triggerAction(target);
           return;
         }
 
-        // Find nearest action button in container
         const container = target.closest("div, form, section") || document.body;
         const actionButton = container.querySelector("[data-action]");
         if (actionButton) {
@@ -391,7 +388,6 @@ const app = {
       }
     });
 
-    // Focus the prompt input on load
     promptInput.focus();
   },
 };

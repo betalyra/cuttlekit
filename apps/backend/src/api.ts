@@ -6,11 +6,30 @@ import {
   HttpApiGroup,
   HttpServerResponse,
 } from "@effect/platform";
-import { Effect, Layer, Schema, Stream } from "effect";
-import { RequestHandlerService, type StreamEvent } from "./services/request-handler.js";
-import { Request } from "./types/messages.js";
+import { Effect, PubSub, Queue, Schema, Stream, pipe } from "effect";
+import {
+  ProcessorRegistry,
+  DurableEventLog,
+  ActionPayloadSchema,
+  type StreamEvent,
+  type StreamEventWithOffset,
+} from "./services/durable/index.js";
 
+// ============================================================
+// SSE formatting
+// ============================================================
+
+const textEncoder = new TextEncoder();
+
+const formatSseEvent = (event: StreamEventWithOffset) =>
+  textEncoder.encode(
+    `id: ${event.offset}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`
+  );
+
+// ============================================================
 // API definition
+// ============================================================
+
 export const api = HttpApi.make("api")
   .add(
     HttpApiGroup.make("health").add(
@@ -23,79 +42,131 @@ export const api = HttpApi.make("api")
     )
   )
   .add(
-    HttpApiGroup.make("generate").add(
-      HttpApiEndpoint.post("generate-stream", "/generate/stream")
-        .setPayload(Request)
-        .addSuccess(Schema.Unknown)
-        .addError(HttpApiError.InternalServerError)
-    )
+    HttpApiGroup.make("stream")
+      .add(
+        HttpApiEndpoint.post("submit-action", "/stream/:sessionId")
+          .setPath(Schema.Struct({ sessionId: Schema.String }))
+          .setPayload(ActionPayloadSchema)
+          .addSuccess(Schema.Struct({ queued: Schema.Boolean }), {
+            status: 202,
+          })
+          .addError(HttpApiError.InternalServerError)
+      )
+      .add(
+        HttpApiEndpoint.get("subscribe", "/stream/:sessionId")
+          .setPath(Schema.Struct({ sessionId: Schema.String }))
+          .setUrlParams(
+            Schema.Struct({
+              offset: Schema.optional(Schema.NumberFromString),
+            })
+          )
+          .addSuccess(Schema.Unknown)
+          .addError(HttpApiError.InternalServerError)
+      )
   );
 
+// ============================================================
 // Health group handlers
-export const healthGroupLive = HttpApiBuilder.group(api, "health", (handlers) =>
-  handlers.handle("health", () =>
-    Effect.succeed({
-      status: "ok",
-    })
-  )
+// ============================================================
+
+export const healthGroupLive = HttpApiBuilder.group(
+  api,
+  "health",
+  (handlers) =>
+    handlers.handle("health", () =>
+      Effect.succeed({
+        status: "ok",
+      })
+    )
 );
 
-// SSE formatting utilities
-const textEncoder = new TextEncoder();
+// ============================================================
+// Stream group handlers
+// ============================================================
 
-const formatSseEvent = (event: { event: string; data?: string }) => {
-  const eventLine = `event: ${event.event}\n`;
-  const dataLine = event.data ? `data: ${event.data}\n` : "";
-  return textEncoder.encode(`${eventLine}${dataLine}\n`);
-};
+export const streamGroupLive = HttpApiBuilder.group(
+  api,
+  "stream",
+  (handlers) =>
+    handlers
+      .handle("submit-action", ({ path, payload }) =>
+        Effect.gen(function* () {
+          const registry = yield* ProcessorRegistry;
+          const processor = yield* registry.getOrCreate(path.sessionId);
+          yield* registry.touch(path.sessionId);
 
-const streamToSse = (eventStream: Stream.Stream<StreamEvent, Error>) =>
-  eventStream.pipe(
-    Stream.map((event) => ({
-      event: "message" as const,
-      data: JSON.stringify(event),
-    })),
-    Stream.concat(
-      Stream.make({
-        event: "close" as const,
-        data: undefined as string | undefined,
-      })
-    ),
-    Stream.map(formatSseEvent),
-    Stream.catchAll((error) =>
-      Stream.make(
-        formatSseEvent({
-          event: "error",
-          data: error instanceof Error ? error.message : String(error),
-        })
+          yield* Queue.offer(processor.actionQueue, {
+            type: payload.prompt ? "prompt" : "action",
+            prompt: payload.prompt,
+            action: payload.action,
+            actionData: payload.actionData,
+            currentHtml: payload.currentHtml,
+          });
+
+          return { queued: true };
+        }).pipe(
+          Effect.mapError(() => new HttpApiError.InternalServerError())
+        )
       )
-    )
-  );
+      .handleRaw("subscribe", ({ path, urlParams }) =>
+        Effect.gen(function* () {
+          const registry = yield* ProcessorRegistry;
+          const eventLog = yield* DurableEventLog;
+          const processor = yield* registry.getOrCreate(path.sessionId);
+          yield* registry.touch(path.sessionId);
 
-// Generate group handlers
-export const makeGenerateGroupLive = <E, R>(
-  servicesLayer: Layer.Layer<RequestHandlerService, E, R>
-) =>
-  HttpApiBuilder.group(api, "generate", (handlers) =>
-    handlers.handle("generate-stream", ({ payload }) =>
-      Effect.gen(function* () {
-        const requestHandler = yield* RequestHandlerService;
+          const clientOffset = urlParams.offset ?? -1;
 
-        const eventStream = yield* requestHandler
-          .handleStreamRequest(payload)
-          .pipe(Effect.mapError(() => new HttpApiError.InternalServerError()));
+          // Use unwrapScoped so the PubSub subscription lives as long as
+          // the SSE stream (not the handler effect's scope).
+          const eventStream = Stream.unwrapScoped(
+            Effect.gen(function* () {
+              // STEP 1: Subscribe to PubSub FIRST (eager — buffers events)
+              const subscription = yield* PubSub.subscribe(
+                processor.eventPubSub
+              );
 
-        const bodyStream = streamToSse(eventStream);
+              // STEP 2: Read missed events from DB
+              const missedRows = yield* eventLog.readFrom(
+                path.sessionId,
+                clientOffset
+              );
+              const dbMaxOffset =
+                missedRows.length > 0
+                  ? missedRows[missedRows.length - 1].offset
+                  : clientOffset;
 
-        return HttpServerResponse.stream(bodyStream, {
-          contentType: "text/event-stream",
-          headers: {
-            "Content-Type": "text/event-stream",
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-            Connection: "keep-alive",
-          },
-        });
-      }).pipe(Effect.mapError(() => new HttpApiError.InternalServerError()))
-    )
-  ).pipe(Layer.provide(servicesLayer));
+              // STEP 3: Convert DB rows to events with offset
+              const missedStream = Stream.fromIterable(
+                missedRows.map((row) => ({
+                  ...(JSON.parse(row.data) as StreamEvent),
+                  offset: row.offset,
+                }))
+              );
+
+              // STEP 4: Filter PubSub stream to skip already-sent events
+              const deduplicatedPubSubStream = pipe(
+                Stream.fromQueue(subscription),
+                Stream.filter((event) => event.offset > dbMaxOffset)
+              );
+
+              // STEP 5: Compose: replay first, then live
+              return Stream.concat(missedStream, deduplicatedPubSubStream);
+            })
+          );
+
+          const bodyStream = pipe(eventStream, Stream.map(formatSseEvent));
+
+          return HttpServerResponse.stream(bodyStream, {
+            contentType: "text/event-stream",
+            headers: {
+              "Cache-Control": "no-cache",
+              "X-Accel-Buffering": "no",
+              Connection: "keep-alive",
+            },
+          });
+        }).pipe(
+          Effect.mapError(() => new HttpApiError.InternalServerError())
+        )
+      )
+);

@@ -3,7 +3,7 @@ import { NodeHttpServer, NodeRuntime, NodeFileSystem, NodePath } from "@effect/p
 import { Config, Effect, Layer, Logger, LogLevel } from "effect";
 import { createServer } from "node:http";
 
-import { api, healthGroupLive, makeGenerateGroupLive } from "./api.js";
+import { api, healthGroupLive, streamGroupLive } from "./api.js";
 import { GenerateService, PromptLogger } from "./services/generate/index.js";
 import {
   GroqLanguageModelLayer,
@@ -18,7 +18,12 @@ import {
 } from "./services/memory/index.js";
 import { VdomService, PatchValidator } from "./services/vdom/index.js";
 import { UIService } from "./services/ui.js";
-import { RequestHandlerService } from "./services/request-handler.js";
+import {
+  DurableEventLog,
+  ProcessorRegistry,
+  dormancyChecker,
+  eventCleanup,
+} from "./services/durable/index.js";
 
 // LLM provider layer based on LLM_PROVIDER env var (groq | google)
 // Dies on config error - no point running without a model
@@ -46,7 +51,7 @@ const LlmLayerLive = Layer.unwrapEffect(
 const EmbeddingLayerLive = GoogleEmbeddingModelLayer();
 
 // Compose all service layers
-// Build from dependencies up: base infra → services → handlers
+// Build from dependencies up: base infra → services → durable → API
 
 // Database and store
 const StoreWithDb = StoreService.Default.pipe(Layer.provide(DatabaseLayer));
@@ -83,14 +88,36 @@ const UIWithDeps = UIService.Default.pipe(
   Layer.provide(VdomService.Default),
 );
 
-const ServicesLive = RequestHandlerService.Default.pipe(
+// Durable event log depends on database
+const EventLogWithDeps = DurableEventLog.Default.pipe(
+  Layer.provide(DatabaseLayer),
+);
+
+// Processor registry depends on UI service and event log
+const RegistryWithDeps = ProcessorRegistry.Default.pipe(
   Layer.provide(UIWithDeps),
+  Layer.provide(EventLogWithDeps),
+);
+
+// Background jobs layer - forks dormancy checker and event cleanup
+const BackgroundJobs = Layer.effectDiscard(
+  Effect.gen(function* () {
+    yield* Effect.forkScoped(dormancyChecker);
+    yield* Effect.forkScoped(eventCleanup);
+    yield* Effect.log("Background jobs started");
+  })
+).pipe(
+  Layer.provide(RegistryWithDeps),
+  Layer.provide(EventLogWithDeps),
 );
 
 // Compose API layers
 const ApiLive = HttpApiBuilder.api(api).pipe(
   Layer.provide(healthGroupLive),
-  Layer.provide(makeGenerateGroupLive(ServicesLive)),
+  Layer.provide(streamGroupLive),
+  Layer.provide(RegistryWithDeps),
+  Layer.provide(EventLogWithDeps),
+  Layer.provide(BackgroundJobs),
 );
 
 // HTTP server layer
@@ -102,5 +129,5 @@ const HttpLive = HttpApiBuilder.serve(HttpMiddleware.logger).pipe(
   Layer.provide(Logger.minimumLogLevel(LogLevel.Debug)),
 );
 
-// Launch (scoped for MemoryService's background queue)
+// Launch (scoped for background fibers)
 Layer.launch(HttpLive).pipe(Effect.scoped, NodeRuntime.runMain);
