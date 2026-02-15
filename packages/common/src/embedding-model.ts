@@ -1,10 +1,12 @@
 import { Context, Layer } from "effect";
 import type { EmbeddingModel } from "ai";
+import type { ProviderOptions } from "@ai-sdk/provider-utils";
 
 export type EmbeddingModelConfig = {
   readonly model: EmbeddingModel;
   readonly dimensions: number;
   readonly providerName: string;
+  readonly providerOptions?: ProviderOptions;
 };
 
 export class EmbeddingModelProvider extends Context.Tag(
@@ -19,4 +21,5 @@ export const TestEmbeddingModelLayer = (
     model,
     dimensions,
     providerName: "test",
+    providerOptions: undefined,
   });

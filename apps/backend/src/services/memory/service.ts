@@ -121,7 +121,8 @@ export class MemoryService extends Effect.Service<MemoryService>()(
     effect: Effect.gen(function* () {
       const store = yield* StoreService;
       const { model: languageModel } = yield* LanguageModelProvider;
-      const { model: embeddingModel } = yield* EmbeddingModelProvider;
+      const { model: embeddingModel, providerOptions } =
+        yield* EmbeddingModelProvider;
 
       // Queue for async memory operations
       const queue = yield* Queue.unbounded<MemoryOperation>();
@@ -196,7 +197,11 @@ Generate:
 
           // 3. Generate embedding
           const { embedding } = yield* Effect.promise(() =>
-            embed({ model: embeddingModel, value: textToEmbed }),
+            embed({
+              model: embeddingModel,
+              value: textToEmbed,
+              providerOptions,
+            }),
           );
 
           // 4. Store in database
@@ -268,7 +273,7 @@ Generate:
       ): Effect.Effect<MemorySearchResult[]> =>
         Effect.gen(function* () {
           const { embedding } = yield* Effect.promise(() =>
-            embed({ model: embeddingModel, value: query }),
+            embed({ model: embeddingModel, value: query, providerOptions }),
           );
           return yield* store.searchByVector(sessionId, embedding, limit);
         });
