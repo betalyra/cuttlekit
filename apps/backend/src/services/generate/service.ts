@@ -1,9 +1,13 @@
 import { Effect, Stream, pipe, DateTime, Duration, Ref } from "effect";
 import { streamText } from "ai";
-import { LanguageModelProvider } from "@betalyra/generative-ui-common/server";
+import {
+  LanguageModelProvider,
+  type LanguageModelConfig,
+} from "@betalyra/generative-ui-common/server";
 import { MemoryService, type MemorySearchResult } from "../memory/index.js";
 import { accumulateLinesWithFlush } from "../../stream/utils.js";
 import { PatchValidator, type Patch } from "../vdom/index.js";
+import { ModelRegistry } from "../model-registry.js";
 import {
   PatchSchema,
   LLMResponseSchema,
@@ -26,8 +30,8 @@ export class GenerateService extends Effect.Service<GenerateService>()(
   {
     accessors: true,
     effect: Effect.gen(function* () {
-      const { model, providerOptions, extractUsage, providerName } =
-        yield* LanguageModelProvider;
+      const defaultConfig = yield* LanguageModelProvider;
+      const modelRegistry = yield* ModelRegistry;
       const memory = yield* MemoryService;
       const patchValidator = yield* PatchValidator;
       const promptLogger = yield* PromptLogger;
@@ -94,13 +98,14 @@ export class GenerateService extends Effect.Service<GenerateService>()(
         messages: readonly Message[],
         validationDoc: Document,
         usageRef: Ref.Ref<Usage[]>,
+        modelConfig: LanguageModelConfig,
       ): Stream.Stream<UnifiedResponse, GenerationError | Error> =>
         Stream.unwrap(
           Effect.gen(function* () {
             const result = streamText({
-              model,
+              model: modelConfig.model,
               messages: messages as Message[],
-              providerOptions,
+              providerOptions: modelConfig.providerOptions,
             });
 
             // Use fullStream to get both text AND usage events
@@ -123,7 +128,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
                   // Capture usage from finish-step using provider-specific extractor
                   if (raw.type === "finish-step") {
                     if (raw.usage) {
-                      const extracted = extractUsage(raw.usage);
+                      const extracted = modelConfig.extractUsage(raw.usage);
                       yield* Ref.update(usageRef, (usages) => [
                         ...usages,
                         {
@@ -171,6 +176,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
         patchesRef: Ref.Ref<Patch[]>,
         modeRef: Ref.Ref<"patches" | "full">,
         attempt: number,
+        modelConfig: LanguageModelConfig,
       ): Stream.Stream<UnifiedResponse, Error> => {
         if (attempt >= MAX_RETRY_ATTEMPTS) {
           return Stream.fail(
@@ -179,7 +185,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
         }
 
         return pipe(
-          createAttemptStream(messages, validationDoc, usageRef),
+          createAttemptStream(messages, validationDoc, usageRef, modelConfig),
 
           // Track successful patches, mode, and log
           Stream.tap((response) =>
@@ -236,6 +242,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
                     patchesRef,
                     modeRef,
                     attempt + 1,
+                    modelConfig,
                   ),
                 );
               }),
@@ -251,8 +258,13 @@ export class GenerateService extends Effect.Service<GenerateService>()(
         Effect.gen(function* () {
           const { sessionId, currentHtml, actions } = options;
 
+          const modelConfig = options.modelId
+            ? yield* modelRegistry.resolve(options.modelId)
+            : defaultConfig;
+
           yield* Effect.log("Streaming unified response", {
-            provider: providerName,
+            provider: modelConfig.providerName,
+            model: options.modelId ?? "default",
             actionCount: actions.length,
             hasCurrentHtml: !!currentHtml,
           });
@@ -360,6 +372,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
             patchesRef,
             modeRef,
             0,
+            modelConfig,
           );
 
           // Stats stream runs AFTER content stream completes

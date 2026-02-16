@@ -31,14 +31,19 @@ export const runProcessingLoop = (
         );
         const actions = Chunk.toReadonlyArray(actionsChunk);
 
+        // Use the model from the last action that specifies one
+        const modelId = [...actions].reverse().find((a) => a.model)?.model;
+
         yield* Effect.log("Processing actions", {
           sessionId,
           count: actions.length,
+          modelId,
         });
 
         const stream = yield* uiService.generateStream({
           sessionId,
           actions,
+          modelId,
         });
 
         yield* pipe(

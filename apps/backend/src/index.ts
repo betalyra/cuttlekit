@@ -3,7 +3,7 @@ import { NodeHttpServer, NodeRuntime, NodeFileSystem, NodePath } from "@effect/p
 import { Config, Effect, Layer, Logger, LogLevel } from "effect";
 import { createServer } from "node:http";
 
-import { api, healthGroupLive, sessionsGroupLive, streamGroupLive } from "./api.js";
+import { api, healthGroupLive, sessionsGroupLive, streamGroupLive, modelsGroupLive } from "./api.js";
 import { GenerateService, PromptLogger } from "./services/generate/index.js";
 import {
   GroqLanguageModelLayer,
@@ -24,6 +24,7 @@ import {
   dormancyChecker,
   eventCleanup,
 } from "./services/durable/index.js";
+import { ModelRegistry } from "./services/model-registry.js";
 
 // LLM provider layer based on LLM_PROVIDER env var (groq | google)
 // Dies on config error - no point running without a model
@@ -72,10 +73,16 @@ const PromptLoggerWithDeps = PromptLogger.Default.pipe(
   Layer.provide(NodePath.layer),
 );
 
-// Generate service depends on memory, LLM, and prompt logger
+// Model registry depends on FileSystem (reads config.toml)
+const ModelRegistryLive = ModelRegistry.Default.pipe(
+  Layer.provide(NodeFileSystem.layer),
+);
+
+// Generate service depends on memory, LLM, model registry, and prompt logger
 const GenerateWithDeps = GenerateService.Default.pipe(
   Layer.provide(MemoryWithDeps),
   Layer.provide(LlmLayerLive),
+  Layer.provide(ModelRegistryLive),
   Layer.provide(PatchValidator.Default),
   Layer.provide(PromptLoggerWithDeps),
 );
@@ -115,8 +122,10 @@ const BackgroundJobs = Layer.effectDiscard(
 const ApiLive = HttpApiBuilder.api(api).pipe(
   Layer.provide(healthGroupLive),
   Layer.provide(sessionsGroupLive),
+  Layer.provide(modelsGroupLive),
   Layer.provide(streamGroupLive),
   Layer.provide(SessionWithDeps),
+  Layer.provide(ModelRegistryLive),
   Layer.provide(RegistryWithDeps),
   Layer.provide(EventLogWithDeps),
   Layer.provide(BackgroundJobs),

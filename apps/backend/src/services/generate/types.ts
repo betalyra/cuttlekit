@@ -53,6 +53,7 @@ export type UnifiedGenerateOptions = {
   sessionId: string;
   currentHtml?: string;
   actions: readonly Action[];
+  modelId?: string;
 };
 
 // ============================================================

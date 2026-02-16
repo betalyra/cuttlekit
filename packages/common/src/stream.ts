@@ -17,6 +17,7 @@ export const ActionSchema = Schema.Struct({
     Schema.Record({ key: Schema.String, value: Schema.Unknown }),
   ),
   currentHtml: Schema.optional(Schema.String),
+  model: Schema.optional(Schema.String),
 });
 
 export type Action = typeof ActionSchema.Type;

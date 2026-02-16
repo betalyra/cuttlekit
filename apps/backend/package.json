@@ -16,7 +16,8 @@
     "dependencies": {
         "@betalyra/generative-ui-common": "workspace:*",
         "@libsql/client": "^0.17.0",
-        "drizzle-orm": "^0.45.1"
+        "drizzle-orm": "^0.45.1",
+        "smol-toml": "^1.6.0"
     },
     "devDependencies": {
         "drizzle-kit": "^0.31.8"

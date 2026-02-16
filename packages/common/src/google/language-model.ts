@@ -6,7 +6,7 @@ import {
 } from "../language-model.js";
 
 // Google Gemini format - cachedContentTokenCount in usage metadata
-const extractGoogleUsage: UsageExtractor = (raw) => {
+export const extractGoogleUsage: UsageExtractor = (raw) => {
   const usage = raw as {
     inputTokens?: number;
     outputTokens?: number;
