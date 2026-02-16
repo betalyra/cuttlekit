@@ -1,0 +1,23 @@
+default_model = "moonshotai/kimi-k2-instruct-0905"
+
+[providers.groq]
+
+[providers.groq.options]
+openai = { streamOptions = { includeUsage = true } }
+
+[[providers.groq.models]]
+id = "moonshotai/kimi-k2-instruct-0905"
+label = "Kimi K2"
+
+[[providers.groq.models]]
+id = "openai/gpt-oss-120b"
+label = "GPT-OSS 120B"
+
+[providers.google]
+
+[providers.google.options]
+thinkingConfig = { thinkingLevel = "minimal" }
+
+[[providers.google.models]]
+id = "gemini-3-flash-preview"
+label = "Gemini 3 Flash"

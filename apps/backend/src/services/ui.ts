@@ -9,6 +9,7 @@ import type { UserAction } from "../types/messages.js";
 export type UIRequest = {
   sessionId?: string;
   actions: readonly Action[];
+  modelId?: string;
 };
 
 export class UIService extends Effect.Service<UIService>()("UIService", {
@@ -81,6 +82,7 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
           sessionId,
           currentHtml: isResetAction ? undefined : (currentHtml ?? undefined),
           actions: request.actions,
+          modelId: request.modelId,
         });
 
         // Start with session event

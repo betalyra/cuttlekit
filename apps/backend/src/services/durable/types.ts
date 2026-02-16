@@ -27,6 +27,7 @@ export const ActionPayloadSchema = Schema.Struct({
     Schema.Record({ key: Schema.String, value: Schema.Unknown }),
   ),
   currentHtml: Schema.optional(Schema.String),
+  model: Schema.optional(Schema.String),
 });
 
 export type ActionPayload = typeof ActionPayloadSchema.Type;

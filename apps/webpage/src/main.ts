@@ -5,6 +5,7 @@ import type { Patch, StreamEventWithOffset } from "@betalyra/generative-ui-commo
 
 const API_BASE = "http://localhost:34512";
 const STORAGE_KEY = "generative-ui-stream";
+const MODEL_STORAGE_KEY = "generative-ui-model";
 
 type StreamEvent = StreamEventWithOffset;
 
@@ -34,6 +35,7 @@ const loadStreamState = (): StreamState | null => {
 
 const app = {
   sessionId: null as string | null,
+  selectedModel: null as string | null,
   eventSource: null as EventSource | null,
   lastOffset: -1,
   loading: false,
@@ -53,6 +55,7 @@ const app = {
       promptInput: document.getElementById("prompt-input") as HTMLInputElement,
       sendBtn: document.getElementById("send-btn")!,
       resetBtn: document.getElementById("reset-btn")!,
+      modelSelect: document.getElementById("model-select") as HTMLSelectElement,
       statsEl: document.getElementById("footer-stats")!,
     };
   },
@@ -243,6 +246,7 @@ const app = {
           ...request,
           currentHtml:
             currentHtml && currentHtml.trim() ? currentHtml : undefined,
+          model: this.selectedModel ?? undefined,
         }),
       });
       // Response is 202 — results arrive via SSE
@@ -298,6 +302,42 @@ const app = {
     this.submitAction({ prompt });
   },
 
+  async fetchModels() {
+    const { modelSelect } = this.getElements();
+    try {
+      const res = await fetch(`${API_BASE}/models`);
+      if (!res.ok) throw new Error(`Failed to fetch models: ${res.status}`);
+      const data = await res.json() as {
+        models: { id: string; provider: string; label: string }[];
+        defaultId: string;
+      };
+
+      modelSelect.innerHTML = "";
+      for (const model of data.models) {
+        const option = document.createElement("option");
+        option.value = model.id;
+        option.textContent = model.label;
+        modelSelect.appendChild(option);
+      }
+
+      // Restore from localStorage or use default
+      const saved = localStorage.getItem(MODEL_STORAGE_KEY);
+      const initial = saved && data.models.some((m) => m.id === saved)
+        ? saved
+        : data.defaultId;
+      modelSelect.value = initial;
+      this.selectedModel = initial;
+
+      modelSelect.addEventListener("change", () => {
+        this.selectedModel = modelSelect.value;
+        localStorage.setItem(MODEL_STORAGE_KEY, modelSelect.value);
+      });
+    } catch (err) {
+      console.error("Failed to fetch models:", err);
+      modelSelect.innerHTML = "<option value=''>Unavailable</option>";
+    }
+  },
+
   async createSession(): Promise<string> {
     const res = await fetch(`${API_BASE}/sessions`, { method: "POST" });
     if (!res.ok) throw new Error(`Session creation failed: ${res.status}`);
@@ -328,6 +368,8 @@ const app = {
 
   async init() {
     const { promptInput, sendBtn, resetBtn, contentEl } = this.getElements();
+
+    await this.fetchModels();
 
     const saved = loadStreamState();
     if (saved) {

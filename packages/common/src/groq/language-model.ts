@@ -6,7 +6,7 @@ import {
 } from "../language-model.js";
 
 // Groq uses OpenAI-compatible format
-const extractGroqUsage: UsageExtractor = (raw) => {
+export const extractGroqUsage: UsageExtractor = (raw) => {
   const usage = raw as {
     inputTokens?: number;
     outputTokens?: number;

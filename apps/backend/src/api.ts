@@ -15,6 +15,7 @@ import {
   type StreamEventWithOffset,
 } from "./services/durable/index.js";
 import { SessionService } from "./services/session.js";
+import { ModelRegistry } from "./services/model-registry.js";
 
 // ============================================================
 // SSE formatting
@@ -53,6 +54,22 @@ export const api = HttpApi.make("api")
     )
   )
   .add(
+    HttpApiGroup.make("models").add(
+      HttpApiEndpoint.get("list-models", "/models").addSuccess(
+        Schema.Struct({
+          models: Schema.Array(
+            Schema.Struct({
+              id: Schema.String,
+              provider: Schema.String,
+              label: Schema.String,
+            })
+          ),
+          defaultId: Schema.String,
+        })
+      )
+    )
+  )
+  .add(
     HttpApiGroup.make("stream")
       .add(
         HttpApiEndpoint.post("submit-action", "/stream/:sessionId")
@@ -61,6 +78,7 @@ export const api = HttpApi.make("api")
           .addSuccess(Schema.Struct({ queued: Schema.Boolean }), {
             status: 202,
           })
+          .addError(HttpApiError.BadRequest)
           .addError(HttpApiError.InternalServerError)
       )
       .add(
@@ -111,6 +129,25 @@ export const sessionsGroupLive = HttpApiBuilder.group(
 );
 
 // ============================================================
+// Models group handlers
+// ============================================================
+
+export const modelsGroupLive = HttpApiBuilder.group(
+  api,
+  "models",
+  (handlers) =>
+    handlers.handle("list-models", () =>
+      Effect.gen(function* () {
+        const registry = yield* ModelRegistry;
+        return {
+          models: registry.availableModels(),
+          defaultId: registry.defaultModelId,
+        };
+      })
+    )
+);
+
+// ============================================================
 // Stream group handlers
 // ============================================================
 
@@ -121,6 +158,16 @@ export const streamGroupLive = HttpApiBuilder.group(
     handlers
       .handle("submit-action", ({ path, payload }) =>
         Effect.gen(function* () {
+          // Validate model if specified
+          if (payload.model) {
+            const modelRegistry = yield* ModelRegistry;
+            const available = modelRegistry.availableModels();
+            const isValid = available.some((m) => m.id === payload.model);
+            if (!isValid) {
+              return yield* new HttpApiError.BadRequest();
+            }
+          }
+
           const registry = yield* ProcessorRegistry;
           const processor = yield* registry.getOrCreate(path.sessionId);
           yield* registry.touch(path.sessionId);
@@ -131,11 +178,16 @@ export const streamGroupLive = HttpApiBuilder.group(
             action: payload.action,
             actionData: payload.actionData,
             currentHtml: payload.currentHtml,
+            model: payload.model,
           });
 
           return { queued: true };
         }).pipe(
-          Effect.mapError(() => new HttpApiError.InternalServerError())
+          Effect.mapError((err) =>
+            err instanceof HttpApiError.BadRequest
+              ? err
+              : new HttpApiError.InternalServerError()
+          )
         )
       )
       .handleRaw("subscribe", ({ path, urlParams }) =>
