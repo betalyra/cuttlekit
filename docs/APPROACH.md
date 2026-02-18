@@ -477,6 +477,22 @@ const UnifiedResponseSchema = z.union([
 
 ---
 
+## Step 25: Per-Request Model Selection
+
+**Problem:** Single hardcoded model. No way to switch without restarting the server.
+
+**Solution:** TOML-based model registry (`config.toml`) with per-request resolution.
+
+- Providers and models declared in TOML, API keys from env vars (convention: `groq` → `GROQ_API_KEY`)
+- `ModelRegistry` service resolves model ID to SDK instance at request time
+- Frontend dropdown fetches available models via `GET /models`, sends selection with each POST
+- Batched actions with mixed models → last action's model wins
+- Falls back to configured default if no model specified
+
+**Result:** Users can switch models mid-session. Adding a new provider = one factory entry + TOML config.
+
+---
+
 ## Key Takeaways
 
 1. **Plain HTML over JSX** - AI can steer a responsive frontend by generating plain HTML
