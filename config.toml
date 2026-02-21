@@ -27,12 +27,14 @@ label = "Gemini 3 Flash"
 # --- Sandbox ---
 
 [sandbox]
-enabled = true
 provider = "deno"
-mode = "warm"
+
+[sandbox.deno]
 region = "ams"
-volume_ttl_minutes = 30
-volume_capacity_mb = 500
+mode = "warm"
+use_snapshots = false
+snapshot_capacity_mb = 10000
+volume_capacity_mb = 5000    # currently volume capacity is not used
 timeout_seconds = 300
 memory_mb = 1280
 

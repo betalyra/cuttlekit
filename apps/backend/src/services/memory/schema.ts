@@ -87,7 +87,7 @@ export const streamEvents = sqliteTable(
 );
 
 // ============================================================
-// Sandbox: doc chunks, code modules, session volumes
+// Sandbox: doc chunks
 // ============================================================
 
 // Doc chunks — SDK documentation stored with embeddings for vector search
@@ -106,40 +106,6 @@ export const docChunks = sqliteTable(
   (table) => [index("doc_chunks_package_idx").on(table.package)],
 );
 
-// Session volumes — registry mapping sessions to Deno volumes
-export const sessionVolumes = sqliteTable("session_volumes", {
-  sessionId: text("session_id")
-    .primaryKey()
-    .references(() => sessions.id, { onDelete: "cascade" }),
-  volumeSlug: text("volume_slug").notNull().unique(),
-  region: text("region").notNull(),
-  createdAt: integer("created_at").notNull(),
-  lastAccessedAt: integer("last_accessed_at").notNull(),
-});
-
-// Code modules — AI-saved reusable code metadata with embeddings
-export const codeModules = sqliteTable(
-  "code_modules",
-  {
-    id: text("id")
-      .primaryKey()
-      .$defaultFn(() => createId()),
-    sessionId: text("session_id")
-      .notNull()
-      .references(() => sessions.id, { onDelete: "cascade" }),
-    volumeSlug: text("volume_slug")
-      .notNull()
-      .references(() => sessionVolumes.volumeSlug, { onDelete: "cascade" }),
-    path: text("path").notNull(), // e.g. "lib/linear.ts"
-    description: text("description").notNull(),
-    exports: text("exports", { mode: "json" }).notNull(), // JSON array of export names
-    usage: text("usage").notNull(), // import example
-    embedding: float32Array("embedding", { dimensions: EMBEDDING_DIMENSIONS }),
-    createdAt: integer("created_at").notNull(),
-  },
-  (table) => [index("code_modules_session_idx").on(table.sessionId)],
-);
-
 // Type exports
 export type Session = typeof sessions.$inferSelect;
 export type NewSession = typeof sessions.$inferInsert;
@@ -149,7 +115,3 @@ export type StreamEventRow = typeof streamEvents.$inferSelect;
 export type NewStreamEventRow = typeof streamEvents.$inferInsert;
 export type DocChunk = typeof docChunks.$inferSelect;
 export type NewDocChunk = typeof docChunks.$inferInsert;
-export type SessionVolume = typeof sessionVolumes.$inferSelect;
-export type NewSessionVolume = typeof sessionVolumes.$inferInsert;
-export type CodeModule = typeof codeModules.$inferSelect;
-export type NewCodeModule = typeof codeModules.$inferInsert;

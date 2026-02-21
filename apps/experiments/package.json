@@ -10,12 +10,14 @@
         "volume-test": "tsx src/volume-test.ts",
         "eval-strategy": "tsx src/eval-strategy-test.ts",
         "vector-search": "tsx src/vector-search.ts",
+        "list-deno-resources": "tsx src/list-deno-resources.ts",
+        "test-volume-create": "tsx src/test-volume-create.ts",
         "build": "tsdown",
         "typecheck": "tsc --noEmit"
     },
     "dependencies": {
         "@betalyra/generative-ui-common": "workspace:*",
-        "@deno/sandbox": "^0.8.0",
+        "@deno/sandbox": "^0.12.0",
         "@huggingface/transformers": "^3.8.1",
         "@libsql/client": "^0.17.0",
         "@linear/sdk": "^70.0.0",

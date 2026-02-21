@@ -25,7 +25,7 @@ import {
 } from "./index.js";
 import type { GenerationError } from "./errors.js";
 import { ToolService, TOOL_STEP_LIMIT, type SandboxTools } from "./tools.js";
-import type { ManagedSandbox } from "../sandbox/manager.js";
+import type { ManagedSandbox, SandboxContext } from "../sandbox/manager.js";
 
 export class GenerateService extends Effect.Service<GenerateService>()(
   "GenerateService",
@@ -280,20 +280,21 @@ export class GenerateService extends Effect.Service<GenerateService>()(
             : defaultConfig;
 
           // Build per-request sandbox tools (only when sandbox is configured)
-          // Reuse session-scoped sandboxRef (warm mode) or create fresh one (lazy)
+          // Reuse session-scoped sandboxCtx (warm mode) or create fresh one (lazy)
           const packageInfo = toolService.listPackageInfo();
           const requestTools =
             packageInfo.length > 0
               ? yield* Effect.gen(function* () {
-                  const sandboxRef =
-                    options.sandboxRef ??
-                    (yield* Ref.make<Option.Option<ManagedSandbox>>(
+                  const sandboxCtx: SandboxContext = options.sandboxCtx ?? {
+                    ref: yield* Ref.make<Option.Option<ManagedSandbox>>(
                       Option.none(),
-                    ));
+                    ),
+                    lock: yield* Effect.makeSemaphore(1),
+                  };
                   const runtime = yield* Effect.runtime<never>();
                   return toolService.makeTools({
                     sessionId,
-                    sandboxRef,
+                    sandboxCtx,
                     runtime,
                   });
                 })

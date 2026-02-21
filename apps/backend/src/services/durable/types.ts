@@ -1,7 +1,7 @@
 import { Schema } from "effect";
-import type { Queue, PubSub, Ref, Option, Fiber, Scope } from "effect";
+import type { Queue, PubSub, Ref, Fiber, Scope } from "effect";
 import type { Action, StreamEventWithOffset } from "@betalyra/generative-ui-common/client";
-import type { ManagedSandbox } from "../sandbox/manager.js";
+import type { SandboxContext } from "../sandbox/manager.js";
 
 // Re-export shared types so existing imports keep working
 export {
@@ -42,7 +42,7 @@ export type SessionProcessor = {
   readonly actionQueue: Queue.Queue<Action>;
   readonly eventPubSub: PubSub.PubSub<StreamEventWithOffset>;
   readonly lastActivity: Ref.Ref<number>;
-  readonly sandboxRef: Ref.Ref<Option.Option<ManagedSandbox>>;
+  readonly sandboxCtx: SandboxContext;
   readonly fiber: Fiber.RuntimeFiber<void, never>;
   readonly scope: Scope.CloseableScope;
 };

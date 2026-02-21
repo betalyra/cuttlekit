@@ -15,8 +15,7 @@ import { runProcessingLoop } from "./processor.js";
 import { UIService } from "../ui.js";
 import { DurableEventLog } from "./event-log.js";
 import { SandboxService } from "../sandbox/service.js";
-import { StoreService } from "../memory/store.js";
-import type { ManagedSandbox } from "../sandbox/manager.js";
+import type { ManagedSandbox, SandboxContext } from "../sandbox/manager.js";
 import type { Action, SessionProcessor, StreamEventWithOffset } from "./types.js";
 
 export class ProcessorRegistry extends Effect.Service<ProcessorRegistry>()(
@@ -28,7 +27,6 @@ export class ProcessorRegistry extends Effect.Service<ProcessorRegistry>()(
       const uiService = yield* UIService;
       const eventLog = yield* DurableEventLog;
       const sandboxService = yield* SandboxService;
-      const store = yield* StoreService;
 
       const processors = yield* Ref.make(
         HashMap.empty<string, SessionProcessor>()
@@ -37,7 +35,7 @@ export class ProcessorRegistry extends Effect.Service<ProcessorRegistry>()(
 
       const warmupSandbox = (
         sessionId: string,
-        sandboxRef: Ref.Ref<Option.Option<ManagedSandbox>>,
+        sandboxCtx: SandboxContext,
       ) =>
         Effect.gen(function* () {
           if (Option.isNone(sandboxService.manager)) return;
@@ -47,22 +45,7 @@ export class ProcessorRegistry extends Effect.Service<ProcessorRegistry>()(
           const startTime = yield* DateTime.now;
           yield* Effect.log("Warm start: creating sandbox", { sessionId });
 
-          // Ensure volume exists
-          let volumeEntry = yield* store.getSessionVolume(sessionId);
-          if (!volumeEntry) {
-            yield* Effect.logDebug("Warm start: creating volume", { sessionId });
-            const slug = yield* manager.createVolume(sessionId);
-            yield* store.registerVolume(sessionId, slug, manager.config.region);
-            volumeEntry = yield* store.getSessionVolume(sessionId);
-            const volumeTime = yield* DateTime.now;
-            yield* Effect.logDebug("Warm start: volume created", {
-              sessionId,
-              elapsed: `${Duration.toMillis(DateTime.distanceDuration(startTime, volumeTime))}ms`,
-            });
-          }
-
-          const volumeSlug = volumeEntry?.volumeSlug;
-          yield* manager.getOrCreateSandbox(sessionId, sandboxRef, volumeSlug);
+          yield* manager.getOrCreateSandbox(sessionId, sandboxCtx);
           const endTime = yield* DateTime.now;
           yield* Effect.log("Warm start: sandbox ready", {
             sessionId,
@@ -79,10 +62,12 @@ export class ProcessorRegistry extends Effect.Service<ProcessorRegistry>()(
           const sandboxRef = yield* Ref.make<Option.Option<ManagedSandbox>>(
             Option.none(),
           );
+          const sandboxLock = yield* Effect.makeSemaphore(1);
+          const sandboxCtx: SandboxContext = { ref: sandboxRef, lock: sandboxLock };
 
           // Fork warm-up as non-fatal background fiber
           yield* pipe(
-            warmupSandbox(sessionId, sandboxRef),
+            warmupSandbox(sessionId, sandboxCtx),
             Effect.catchAll((error) =>
               Effect.logWarning("Warm start failed (non-fatal)", {
                 sessionId,
@@ -93,7 +78,7 @@ export class ProcessorRegistry extends Effect.Service<ProcessorRegistry>()(
           );
 
           const fiber = yield* pipe(
-            runProcessingLoop(sessionId, actionQueue, eventPubSub, sandboxRef),
+            runProcessingLoop(sessionId, actionQueue, eventPubSub, sandboxCtx),
             Effect.provideService(UIService, uiService),
             Effect.provideService(DurableEventLog, eventLog),
             Effect.forkIn(scope)
@@ -106,7 +91,7 @@ export class ProcessorRegistry extends Effect.Service<ProcessorRegistry>()(
             actionQueue,
             eventPubSub,
             lastActivity,
-            sandboxRef,
+            sandboxCtx,
             fiber,
             scope,
           } satisfies SessionProcessor;

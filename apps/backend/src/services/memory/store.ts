@@ -5,12 +5,9 @@ import {
   sessions,
   sessionMemoryEntries,
   docChunks,
-  codeModules,
-  sessionVolumes,
   type NewSession,
   type NewSessionMemoryEntry,
   type NewDocChunk,
-  type NewCodeModule,
 } from "./schema.js";
 
 export class StoreService extends Effect.Service<StoreService>()(
@@ -197,112 +194,6 @@ export class StoreService extends Effect.Service<StoreService>()(
           }));
         });
 
-      // ============ CODE MODULES ============
-
-      const upsertCodeModule = (data: NewCodeModule) =>
-        Effect.promise(() =>
-          db
-            .insert(codeModules)
-            .values(data)
-            .onConflictDoUpdate({
-              target: codeModules.id,
-              set: {
-                description: data.description,
-                exports: data.exports,
-                usage: data.usage,
-                embedding: data.embedding,
-                createdAt: data.createdAt,
-              },
-            }),
-        );
-
-      const searchCodeModulesByVector = (
-        vectorJson: string,
-        sessionId: string,
-        limit: number,
-      ) =>
-        Effect.gen(function* () {
-          const result = yield* Effect.promise(() =>
-            client.execute({
-              sql: `
-                SELECT
-                  cm.path,
-                  cm.description,
-                  cm.usage,
-                  vector_distance_cos(cm.embedding, vector32(?)) as distance
-                FROM vector_top_k('code_modules_embedding_idx', vector32(?), ?) AS vt
-                JOIN code_modules cm ON cm.rowid = vt.id
-                WHERE cm.session_id = ?
-                ORDER BY distance ASC
-              `,
-              args: [vectorJson, vectorJson, limit, sessionId],
-            }),
-          );
-
-          return result.rows.slice(0, limit).map((row) => ({
-            path: row.path as string,
-            description: row.description as string,
-            usage: row.usage as string,
-            distance: row.distance as number,
-          }));
-        });
-
-      // ============ SESSION VOLUMES ============
-
-      const getSessionVolume = (sessionId: string) =>
-        Effect.gen(function* () {
-          const result = yield* Effect.promise(() =>
-            db
-              .select()
-              .from(sessionVolumes)
-              .where(eq(sessionVolumes.sessionId, sessionId)),
-          );
-          return result[0] ?? null;
-        });
-
-      const registerVolume = (
-        sessionId: string,
-        volumeSlug: string,
-        region: string,
-      ) =>
-        Effect.promise(() =>
-          db
-            .insert(sessionVolumes)
-            .values({
-              sessionId,
-              volumeSlug,
-              region,
-              createdAt: Date.now(),
-              lastAccessedAt: Date.now(),
-            })
-            .onConflictDoUpdate({
-              target: sessionVolumes.sessionId,
-              set: { volumeSlug, region, lastAccessedAt: Date.now() },
-            }),
-        );
-
-      const touchVolume = (sessionId: string) =>
-        Effect.promise(() =>
-          db
-            .update(sessionVolumes)
-            .set({ lastAccessedAt: Date.now() })
-            .where(eq(sessionVolumes.sessionId, sessionId)),
-        );
-
-      const deleteVolumeRegistry = (sessionId: string) =>
-        Effect.gen(function* () {
-          yield* Effect.promise(() =>
-            db
-              .delete(codeModules)
-              .where(eq(codeModules.sessionId, sessionId)),
-          );
-          yield* Effect.promise(() =>
-            db
-              .delete(sessionVolumes)
-              .where(eq(sessionVolumes.sessionId, sessionId)),
-          );
-        });
-
       return {
         // Sessions
         insertSession,
@@ -319,14 +210,6 @@ export class StoreService extends Effect.Service<StoreService>()(
         getDocChunkHash,
         upsertDocChunk,
         searchDocChunksByVector,
-        // Code modules
-        upsertCodeModule,
-        searchCodeModulesByVector,
-        // Session volumes
-        getSessionVolume,
-        registerVolume,
-        touchVolume,
-        deleteVolumeRegistry,
       };
     }),
   }

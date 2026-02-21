@@ -27,24 +27,26 @@ const SandboxDependencyDefSchema = Schema.Struct({
   }),
 });
 
-const SandboxDefSchema = Schema.Struct({
-  enabled: Schema.optionalWith(Schema.Boolean, { default: () => true }),
-  provider: Schema.Literal("deno"),
+// Provider-specific schemas
+const DenoProviderDefSchema = Schema.Struct({
+  region: Schema.optionalWith(Schema.String, { default: () => "ord" }),
   mode: Schema.optionalWith(Schema.Literal("lazy", "warm"), {
     default: () => "lazy" as const,
   }),
-  region: Schema.optionalWith(Schema.String, { default: () => "ord" }),
-  volume_ttl_minutes: Schema.optionalWith(Schema.Number, {
-    default: () => 30,
-  }),
-  volume_capacity_mb: Schema.optionalWith(Schema.Number, {
-    default: () => 300,
-  }),
+  use_snapshots: Schema.optionalWith(Schema.Boolean, { default: () => true }),
   snapshot_capacity_mb: Schema.optionalWith(Schema.Number, {
     default: () => 10000,
   }),
+  volume_capacity_mb: Schema.optionalWith(Schema.Number, {
+    default: () => 5000,
+  }),
   timeout_seconds: Schema.optionalWith(Schema.Number, { default: () => 300 }),
   memory_mb: Schema.optionalWith(Schema.Number, { default: () => 1280 }),
+});
+
+const SandboxDefSchema = Schema.Struct({
+  provider: Schema.String,
+  deno: Schema.optional(DenoProviderDefSchema),
   dependencies: Schema.optionalWith(Schema.Array(SandboxDependencyDefSchema), {
     default: () => [],
   }),
@@ -87,13 +89,12 @@ export type SandboxDependencyConfig = {
 };
 
 export type SandboxConfig = {
-  readonly enabled: boolean;
-  readonly provider: "deno";
+  readonly provider: string;
   readonly mode: "lazy" | "warm";
   readonly region: string;
-  readonly volumeTtlMinutes: number;
-  readonly volumeCapacityMb: number;
+  readonly useSnapshots: boolean;
   readonly snapshotCapacityMb: number;
+  readonly volumeCapacityMb: number;
   readonly timeoutSeconds: number;
   readonly memoryMb: number;
   readonly dependencies: ReadonlyArray<SandboxDependencyConfig>;
@@ -107,6 +108,60 @@ export type AppConfig = {
 // Convention: provider "groq" → env var "GROQ_API_KEY"
 const apiKeyEnvName = (providerName: string) =>
   `${providerName.toUpperCase()}_API_KEY`;
+
+// ============================================================
+// Resolve sandbox config from TOML section
+// ============================================================
+
+type SandboxDef = Schema.Schema.Type<typeof SandboxDefSchema>;
+
+const resolveSandbox = (def: SandboxDef) =>
+  Effect.gen(function* () {
+    // Resolve provider-specific settings
+    const providerConfig = def.provider === "deno" ? def.deno : undefined;
+    if (!providerConfig) {
+      yield* Effect.logWarning(
+        `Sandbox provider '${def.provider}' selected but [sandbox.${def.provider}] not configured`,
+      );
+      return Option.none<SandboxConfig>();
+    }
+
+    const dependencies = yield* pipe(
+      def.dependencies,
+      Effect.forEach((dep) =>
+        Effect.gen(function* () {
+          const secretValue = dep.secret_env
+            ? yield* Config.redacted(dep.secret_env).pipe(
+                Config.withDefault(Redacted.make("")),
+                Effect.map((v) =>
+                  Redacted.value(v) === "" ? undefined : v,
+                ),
+              )
+            : undefined;
+
+          return {
+            package: dep.package,
+            docs: dep.docs,
+            secretEnv: dep.secret_env,
+            secretValue,
+            hosts: dep.hosts,
+          } satisfies SandboxDependencyConfig;
+        }),
+      ),
+    );
+
+    return Option.some({
+      provider: def.provider,
+      mode: providerConfig.mode,
+      region: providerConfig.region,
+      useSnapshots: providerConfig.use_snapshots,
+      snapshotCapacityMb: providerConfig.snapshot_capacity_mb,
+      volumeCapacityMb: providerConfig.volume_capacity_mb,
+      timeoutSeconds: providerConfig.timeout_seconds,
+      memoryMb: providerConfig.memory_mb,
+      dependencies,
+    } satisfies SandboxConfig);
+  });
 
 // ============================================================
 // Loader
@@ -146,48 +201,9 @@ export const loadAppConfig = Effect.gen(function* () {
   const models: ModelsConfig = { defaultModelId, providers };
 
   // Resolve sandbox config (optional — absent section = no sandbox)
-  const sandbox: Option.Option<SandboxConfig> = toml.sandbox
-    ? yield* Effect.gen(function* () {
-        const def = toml.sandbox!;
-
-        const dependencies = yield* pipe(
-          def.dependencies,
-          Effect.forEach((dep) =>
-            Effect.gen(function* () {
-              const secretValue = dep.secret_env
-                ? yield* Config.redacted(dep.secret_env).pipe(
-                    Config.withDefault(Redacted.make("")),
-                    Effect.map((v) =>
-                      Redacted.value(v) === "" ? undefined : v,
-                    ),
-                  )
-                : undefined;
-
-              return {
-                package: dep.package,
-                docs: dep.docs,
-                secretEnv: dep.secret_env,
-                secretValue,
-                hosts: dep.hosts,
-              } satisfies SandboxDependencyConfig;
-            }),
-          ),
-        );
-
-        return Option.some({
-          enabled: def.enabled,
-          provider: def.provider,
-          mode: def.mode,
-          region: def.region,
-          volumeTtlMinutes: def.volume_ttl_minutes,
-          volumeCapacityMb: def.volume_capacity_mb,
-          snapshotCapacityMb: def.snapshot_capacity_mb,
-          timeoutSeconds: def.timeout_seconds,
-          memoryMb: def.memory_mb,
-          dependencies,
-        } satisfies SandboxConfig);
-      })
-    : Option.none();
+  const sandbox = toml.sandbox
+    ? yield* resolveSandbox(toml.sandbox)
+    : Option.none<SandboxConfig>();
 
   yield* Effect.log("Config loaded", {
     providers: providers.map((p) => p.name),
@@ -196,9 +212,10 @@ export const loadAppConfig = Effect.gen(function* () {
     sandbox: Option.match(sandbox, {
       onNone: () => "none",
       onSome: (s) => ({
-        enabled: s.enabled,
         provider: s.provider,
+        region: s.region,
         mode: s.mode,
+        useSnapshots: s.useSnapshots,
         deps: s.dependencies.map((d) => d.package),
       }),
     }),

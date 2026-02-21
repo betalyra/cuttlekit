@@ -54,14 +54,24 @@ export const buildSandboxPrompt = (deps: PackageInfo[]): string => {
     .join(", ");
   const hasEnvVars = deps.some((d) => d.envVar);
 
-  return `\n\nSANDBOX: You have tools to run TypeScript code and search SDK docs.
-Packages: ${pkgList}${hasEnvVars ? "\n- API keys are auto-injected as env vars — use process.env.VAR_NAME in code" : ""}
-- Tool calls are expensive. Minimize calls: search once, then write+run code in a single run_code call
-- run_code uses a stateful REPL — variables persist across calls. You can also write files (Deno.writeTextFile) and import them in the same call
-- Call search_docs BEFORE writing code to learn the API
-- Call run_code to execute code against real APIs and use the result to build UI
-- Before calling tools, emit a brief loading/status patch that fits the current UI style
-- At the end, emit {"type":"code_modules","modules":[...]} for any reusable code you saved to the sandbox filesystem. Each module: {path, description, exports: string[], usage: "import ..."}`;
+  return `\n\nSANDBOX: Execute TypeScript in a sandboxed environment.
+Packages: ${pkgList}${hasEnvVars ? "\nAPI keys auto-injected — use process.env.VAR_NAME" : ""}
+
+TOOLS: search_docs (search SDK docs — call BEFORE writing code), run_code (stateful TypeScript REPL — vars/imports persist across calls within request), write_file (write file to sandbox), read_file (read file), sh (shell command).
+
+When the user asks for something that requires data (API calls, fetching, etc.), you MUST use tools. Never show placeholder/skeleton data without fetching real data.
+
+IMPORTS: The REPL does NOT support static import statements. Always use dynamic imports:
+CORRECT: const { LinearClient } = await import("@linear/sdk");
+WRONG: import { LinearClient } from "@linear/sdk";
+
+REQUIRED FLOW:
+1. Emit a loading/status patch matching current UI style
+2. Call search_docs to learn the SDK API
+3. Call run_code with ALL code inline — fetch data + return results in one call
+4. Emit final UI patches using the returned data
+
+The REPL is stateful — variables from one run_code call are available in the next within the same request.`;
 };
 
 export const buildSystemPrompt = (deps?: PackageInfo[]): string =>
