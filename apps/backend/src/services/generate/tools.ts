@@ -1,4 +1,4 @@
-import { Effect, Option, Runtime, DateTime, Duration } from "effect";
+import { Effect, Option, Runtime } from "effect";
 import { tool, stepCountIs } from "ai";
 import { z } from "zod";
 import { DocSearchService } from "../doc-search/service.js";
@@ -47,7 +47,13 @@ export class ToolService extends Effect.Service<ToolService>()("ToolService", {
             .describe("Filter to a specific package (e.g., '@linear/sdk')"),
         }),
         execute: async ({ query, package: pkg }) => {
-          const program = docSearch.search(query, { package: pkg });
+          const program = docSearch
+            .search(query, { package: pkg })
+            .pipe(
+              Effect.withSpan("tool.search_docs", {
+                attributes: { sessionId: ctx.sessionId, query },
+              }),
+            );
           return Runtime.runPromise(ctx.runtime)(program);
         },
       });
@@ -82,7 +88,6 @@ export class ToolService extends Effect.Service<ToolService>()("ToolService", {
         }),
         execute: async ({ code, description }) => {
           const program = Effect.gen(function* () {
-            const startTime = yield* DateTime.now;
             yield* Effect.logDebug("run_code:start", {
               description,
               codePreview: code.slice(0, 300),
@@ -91,18 +96,11 @@ export class ToolService extends Effect.Service<ToolService>()("ToolService", {
             const handle = yield* withSandbox(ctx);
             const result = yield* handle.eval(code);
 
-            const elapsed = Duration.toMillis(
-              DateTime.distanceDuration(startTime, yield* DateTime.now),
-            );
             if (result.success) {
-              yield* Effect.logDebug("run_code:done", {
-                description,
-                elapsed: `${elapsed}ms`,
-              });
+              yield* Effect.logDebug("run_code:done", { description });
             } else {
               yield* Effect.logError("run_code:failed", {
                 description,
-                elapsed: `${elapsed}ms`,
                 error: result.error,
               });
             }
@@ -115,6 +113,9 @@ export class ToolService extends Effect.Service<ToolService>()("ToolService", {
                 stdout: "",
               }),
             ),
+            Effect.withSpan("tool.run_code", {
+              attributes: { sessionId: ctx.sessionId, description },
+            }),
           );
           return Runtime.runPromise(ctx.runtime)(program);
         },
@@ -142,6 +143,9 @@ export class ToolService extends Effect.Service<ToolService>()("ToolService", {
             Effect.catchAll((e) =>
               Effect.succeed({ success: false as const, error: String(e) }),
             ),
+            Effect.withSpan("tool.write_file", {
+              attributes: { sessionId: ctx.sessionId, path },
+            }),
           );
           return Runtime.runPromise(ctx.runtime)(program);
         },
@@ -172,6 +176,9 @@ export class ToolService extends Effect.Service<ToolService>()("ToolService", {
                 content: "",
               }),
             ),
+            Effect.withSpan("tool.read_file", {
+              attributes: { sessionId: ctx.sessionId, path },
+            }),
           );
           return Runtime.runPromise(ctx.runtime)(program);
         },
@@ -202,6 +209,12 @@ export class ToolService extends Effect.Service<ToolService>()("ToolService", {
                 exitCode: -1,
               }),
             ),
+            Effect.withSpan("tool.sh", {
+              attributes: {
+                sessionId: ctx.sessionId,
+                command: command.slice(0, 200),
+              },
+            }),
           );
           return Runtime.runPromise(ctx.runtime)(program);
         },

@@ -197,7 +197,14 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
           sessionEvent,
           Stream.concat(contentEvents, doneEvent),
         );
-      });
+      }).pipe(
+        Effect.withSpan("ui.generateStream", {
+          attributes: {
+            sessionId: request.sessionId ?? "new",
+            actionCount: request.actions.length,
+          },
+        }),
+      );
 
     return { generateStream, resolveSession };
   }),
