@@ -25,6 +25,9 @@ import {
   eventCleanup,
 } from "./services/durable/index.js";
 import { ModelRegistry } from "./services/model-registry.js";
+import { SandboxService } from "./services/sandbox/index.js";
+import { ChunkingService, DocSearchService } from "./services/doc-search/index.js";
+import { ToolService } from "./services/generate/tools.js";
 
 // LLM provider layer based on LLM_PROVIDER env var (groq | google)
 // Dies on config error - no point running without a model
@@ -78,21 +81,44 @@ const ModelRegistryLive = ModelRegistry.Default.pipe(
   Layer.provide(NodeFileSystem.layer),
 );
 
-// Generate service depends on memory, LLM, model registry, and prompt logger
+// Sandbox service depends on FileSystem (reads config.toml)
+const SandboxWithDeps = SandboxService.Default.pipe(
+  Layer.provide(NodeFileSystem.layer),
+);
+
+// Doc search service depends on store, embedding, chunking, and config
+const DocSearchWithDeps = DocSearchService.Default.pipe(
+  Layer.provide(StoreWithDb),
+  Layer.provide(EmbeddingLayerLive),
+  Layer.provide(ChunkingService.Default),
+  Layer.provide(NodeFileSystem.layer),
+);
+
+// Tool service depends on doc search, store, and sandbox
+const ToolServiceWithDeps = ToolService.Default.pipe(
+  Layer.provide(DocSearchWithDeps),
+  Layer.provide(StoreWithDb),
+  Layer.provide(SandboxWithDeps),
+);
+
+// Generate service depends on memory, LLM, model registry, prompt logger, and tools
 const GenerateWithDeps = GenerateService.Default.pipe(
   Layer.provide(MemoryWithDeps),
   Layer.provide(LlmLayerLive),
   Layer.provide(ModelRegistryLive),
   Layer.provide(PatchValidator.Default),
   Layer.provide(PromptLoggerWithDeps),
+  Layer.provide(ToolServiceWithDeps),
 );
 
-// UI service depends on generate, memory, session, vdom
+// UI service depends on generate, memory, session, vdom, store, doc search
 const UIWithDeps = UIService.Default.pipe(
   Layer.provide(GenerateWithDeps),
   Layer.provide(MemoryWithDeps),
   Layer.provide(SessionWithDeps),
   Layer.provide(VdomService.Default),
+  Layer.provide(StoreWithDb),
+  Layer.provide(DocSearchWithDeps),
 );
 
 // Durable event log depends on database
@@ -100,10 +126,12 @@ const EventLogWithDeps = DurableEventLog.Default.pipe(
   Layer.provide(DatabaseLayer),
 );
 
-// Processor registry depends on UI service and event log
+// Processor registry depends on UI service, event log, sandbox, and store
 const RegistryWithDeps = ProcessorRegistry.Default.pipe(
   Layer.provide(UIWithDeps),
   Layer.provide(EventLogWithDeps),
+  Layer.provide(SandboxWithDeps),
+  Layer.provide(StoreWithDb),
 );
 
 // Background jobs layer - forks dormancy checker and event cleanup

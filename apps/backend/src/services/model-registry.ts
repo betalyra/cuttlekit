@@ -9,7 +9,7 @@ import {
   extractGroqUsage,
   extractGoogleUsage,
 } from "@betalyra/generative-ui-common/server";
-import { loadModelsConfig, type ProviderConfig } from "./model-config.js";
+import { loadAppConfig, type ProviderConfig } from "./app-config.js";
 
 // ============================================================
 // Error
@@ -98,7 +98,7 @@ export class ModelRegistry extends Effect.Service<ModelRegistry>()(
   {
     accessors: true,
     effect: Effect.gen(function* () {
-      const config = yield* loadModelsConfig;
+      const { models: config } = yield* loadAppConfig;
 
       const entries = yield* pipe(
         config.providers,
