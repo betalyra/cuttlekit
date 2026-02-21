@@ -30,9 +30,10 @@ label = "Gemini 3 Flash"
 provider = "deno"
 
 [sandbox.deno]
-region = "ams"
-mode = "warm"
-use_snapshots = false
+region = "ams"               # amsterdam is fastest region
+init_mode = "eager"
+sandbox_scope = "user"       # "user" (default) or "session"
+use_snapshots = false        # currently only ord supports snapshots
 snapshot_capacity_mb = 10000
 volume_capacity_mb = 5000    # currently volume capacity is not used
 timeout_seconds = 300

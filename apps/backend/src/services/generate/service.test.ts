@@ -120,7 +120,8 @@ const createTestLayer = (mockModel: ReturnType<typeof createMockModel>) =>
 
 const mockSandboxConfig: SandboxConfig = {
   provider: "deno",
-  mode: "lazy",
+  initMode: "lazy",
+  sandboxScope: "session",
   region: "ord",
   useSnapshots: true,
   snapshotCapacityMb: 10000,

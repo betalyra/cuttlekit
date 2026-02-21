@@ -39,6 +39,7 @@ export type ActionPayload = typeof ActionPayloadSchema.Type;
 
 export type SessionProcessor = {
   readonly sessionId: string;
+  readonly userId: string;
   readonly actionQueue: Queue.Queue<Action>;
   readonly eventPubSub: PubSub.PubSub<StreamEventWithOffset>;
   readonly lastActivity: Ref.Ref<number>;

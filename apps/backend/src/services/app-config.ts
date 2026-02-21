@@ -29,11 +29,14 @@ const SandboxDependencyDefSchema = Schema.Struct({
 
 // Provider-specific schemas
 const DenoProviderDefSchema = Schema.Struct({
-  region: Schema.optionalWith(Schema.String, { default: () => "ord" }),
-  mode: Schema.optionalWith(Schema.Literal("lazy", "warm"), {
+  region: Schema.optionalWith(Schema.String, { default: () => "ams" }),
+  init_mode: Schema.optionalWith(Schema.Literal("lazy", "eager"), {
     default: () => "lazy" as const,
   }),
-  use_snapshots: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  sandbox_scope: Schema.optionalWith(Schema.Literal("session", "user"), {
+    default: () => "user" as const,
+  }),
+  use_snapshots: Schema.optionalWith(Schema.Boolean, { default: () => false }),
   snapshot_capacity_mb: Schema.optionalWith(Schema.Number, {
     default: () => 10000,
   }),
@@ -90,7 +93,8 @@ export type SandboxDependencyConfig = {
 
 export type SandboxConfig = {
   readonly provider: string;
-  readonly mode: "lazy" | "warm";
+  readonly initMode: "lazy" | "eager";
+  readonly sandboxScope: "session" | "user";
   readonly region: string;
   readonly useSnapshots: boolean;
   readonly snapshotCapacityMb: number;
@@ -133,9 +137,7 @@ const resolveSandbox = (def: SandboxDef) =>
           const secretValue = dep.secret_env
             ? yield* Config.redacted(dep.secret_env).pipe(
                 Config.withDefault(Redacted.make("")),
-                Effect.map((v) =>
-                  Redacted.value(v) === "" ? undefined : v,
-                ),
+                Effect.map((v) => (Redacted.value(v) === "" ? undefined : v)),
               )
             : undefined;
 
@@ -152,7 +154,8 @@ const resolveSandbox = (def: SandboxDef) =>
 
     return Option.some({
       provider: def.provider,
-      mode: providerConfig.mode,
+      initMode: providerConfig.init_mode,
+      sandboxScope: providerConfig.sandbox_scope,
       region: providerConfig.region,
       useSnapshots: providerConfig.use_snapshots,
       snapshotCapacityMb: providerConfig.snapshot_capacity_mb,
@@ -214,7 +217,8 @@ export const loadAppConfig = Effect.gen(function* () {
       onSome: (s) => ({
         provider: s.provider,
         region: s.region,
-        mode: s.mode,
+        initMode: s.initMode,
+        sandboxScope: s.sandboxScope,
         useSnapshots: s.useSnapshots,
         deps: s.dependencies.map((d) => d.package),
       }),
