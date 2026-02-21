@@ -30,12 +30,6 @@ const SandboxDependencyDefSchema = Schema.Struct({
 // Provider-specific schemas
 const DenoProviderDefSchema = Schema.Struct({
   region: Schema.optionalWith(Schema.String, { default: () => "ams" }),
-  init_mode: Schema.optionalWith(Schema.Literal("lazy", "eager"), {
-    default: () => "lazy" as const,
-  }),
-  sandbox_scope: Schema.optionalWith(Schema.Literal("session", "user"), {
-    default: () => "user" as const,
-  }),
   use_snapshots: Schema.optionalWith(Schema.Boolean, { default: () => false }),
   snapshot_capacity_mb: Schema.optionalWith(Schema.Number, {
     default: () => 10000,
@@ -49,6 +43,12 @@ const DenoProviderDefSchema = Schema.Struct({
 
 const SandboxDefSchema = Schema.Struct({
   provider: Schema.String,
+  init_mode: Schema.optionalWith(Schema.Literal("lazy", "eager"), {
+    default: () => "lazy" as const,
+  }),
+  sandbox_scope: Schema.optionalWith(Schema.Literal("session", "user"), {
+    default: () => "user" as const,
+  }),
   deno: Schema.optional(DenoProviderDefSchema),
   dependencies: Schema.optionalWith(Schema.Array(SandboxDependencyDefSchema), {
     default: () => [],
@@ -154,8 +154,8 @@ const resolveSandbox = (def: SandboxDef) =>
 
     return Option.some({
       provider: def.provider,
-      initMode: providerConfig.init_mode,
-      sandboxScope: providerConfig.sandbox_scope,
+      initMode: def.init_mode,
+      sandboxScope: def.sandbox_scope,
       region: providerConfig.region,
       useSnapshots: providerConfig.use_snapshots,
       snapshotCapacityMb: providerConfig.snapshot_capacity_mb,

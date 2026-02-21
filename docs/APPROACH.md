@@ -497,22 +497,23 @@ const UnifiedResponseSchema = z.union([
 
 **Problem:** To build data-driven UIs (dashboards, issue trackers), the AI needs to call external APIs. MCP was considered but rejected — it exposes too many tools, floods the context with schema definitions, and gives the LLM decision fatigue over which tool to call.
 
-**Solution:** Sandboxed TypeScript execution. The AI writes and runs code against SDKs in a secure sandbox, using the same language it already knows.
+**Solution:** Sandboxed TypeScript execution via Deno Deploy. The AI writes and runs code against SDKs in a secure sandbox, using the same language it already knows.
 
 **What we built:**
-- **SDK documentation search** — Indexed docs are searchable, so the AI learns the API before writing code. Previously saved code modules also appear in search results, creating a knowledge feedback loop
-- **Pre-installed snapshots** — Deno Deploy snapshots with SDK dependencies pre-installed. No npm install at request time
-- **Per-session sandboxes** — Each session gets an isolated sandbox with its own REPL. Variables persist across tool calls within a request
-- **Persistent volumes** — `/workspace/` is volume-mounted and survives across requests. Reusable code (API clients, helpers) is saved here
-- **Provider abstraction** — Sandbox operations (eval, file I/O, shell) are abstracted behind a provider-agnostic interface. Prompt contains no Deno-specific references
+- **SDK documentation search** — Indexed docs are searchable via vector embeddings, so the AI learns the API before writing code
+- **Stateful REPL** — Each sandbox has a Deno REPL where variables persist across tool calls within a request. Only dynamic imports work (`await import()`, not static `import`)
+- **5 tools** — `search_docs`, `run_code`, `write_file`, `read_file`, `sh`
+- **Provider abstraction** — Sandbox operations abstracted behind a provider-agnostic interface, ready for multiple providers (Deno, e2b)
 
-**Speed strategy (informed by benchmarks):**
-- Inline eval is fastest for first response (~400ms)
-- File writes are cheap (~49ms) and can run in parallel
-- Importing pre-saved code from `/workspace/` is as fast as inline eval (~405ms)
-- **Therefore:** AI uses inline code for immediate data fetching, then persists reusable code to `/workspace/` after emitting the UI. Subsequent requests import from `/workspace/`
+**Key iterations and lessons:**
+- **Dropped persistence layer** — Volumes and code modules added complexity for zero benefit. Benchmarks showed inline eval (~400ms) vs file import (~405ms) = no difference. AI would declare `code_modules` without calling `write_file`, causing 3-5 failed retries per request
+- **Lazy REPL init** — REPL must be created *after* deps are installed, not at sandbox creation. Otherwise module resolution is locked to pre-install state
+- **Snapshot toggle** — AMS region doesn't support snapshots. Added `use_snapshots` config; when false, deps are installed via `deno install` directly into the sandbox
+- **Sandbox scoping** — Configurable `sandbox_scope: "session" | "user"`. Session scope = maximum isolation. User scope = all sessions share one sandbox, reducing boot overhead. Implemented via ref-counted `SandboxContext` in the registry
+- **Multi-provider config** — `[sandbox.deno]` nested under `[sandbox]` with `provider = "deno"`, ready for future providers
+- **Prompt engineering** — LLM needs explicit "REQUIRED FLOW" with numbered steps and "you MUST use tools" to reliably call tools instead of emitting placeholder UIs
 
-**Result:** AI builds data-driven UIs by calling real APIs. Compact tool set (5 tools) vs. MCP's unbounded tool surface. Fast first response, faster subsequent requests via persisted code.
+**Result:** AI builds data-driven UIs by calling real APIs. Compact tool set (5 tools) vs. MCP's unbounded tool surface. No persistence overhead — stateless per-request execution is simpler and equally fast.
 
 ---
 
