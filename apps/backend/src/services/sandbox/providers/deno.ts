@@ -1,9 +1,10 @@
-import { Effect, Redacted, Config } from "effect";
+import { Effect, Redacted, Config, Ref, Option } from "effect";
 import { Client, Sandbox, Volume } from "@deno/sandbox";
 import type {
   SandboxProvider,
   SandboxHandle,
   SandboxResult,
+  ShellResult,
   CreateSandboxOptions,
   CreateSnapshotOptions,
   SnapshotRef,
@@ -15,6 +16,8 @@ import type { SandboxConfig } from "../../app-config.js";
 // ============================================================
 // Deno Sandbox Provider
 // ============================================================
+
+type DenoRepl = Awaited<ReturnType<Sandbox["deno"]["repl"]>>;
 
 export const makeDenoProvider = (sandboxConfig: SandboxConfig) =>
   Effect.gen(function* () {
@@ -30,7 +33,6 @@ export const makeDenoProvider = (sandboxConfig: SandboxConfig) =>
         Effect.gen(function* () {
           yield* Effect.log("Creating Deno sandbox", {
             snapshot: options.snapshot?.slug,
-            volume: options.volume?.slug,
             region: options.region,
           });
 
@@ -42,11 +44,6 @@ export const makeDenoProvider = (sandboxConfig: SandboxConfig) =>
             ]),
           );
 
-          // Build volumes mount map
-          const volumes = options.volume
-            ? { "/workspace": options.volume.slug }
-            : undefined;
-
           const sb = yield* Effect.tryPromise({
             try: () =>
               Sandbox.create({
@@ -54,9 +51,8 @@ export const makeDenoProvider = (sandboxConfig: SandboxConfig) =>
                 region: options.region as "ord" | "ams",
                 root: options.snapshot?.slug,
                 secrets,
-                volumes,
                 timeout: `${sandboxConfig.timeoutSeconds}s` as `${number}s`,
-                memoryMb: sandboxConfig.memoryMb,
+                memory: `${sandboxConfig.memoryMb}MiB`,
               }),
             catch: (e) =>
               new SandboxError({
@@ -67,54 +63,112 @@ export const makeDenoProvider = (sandboxConfig: SandboxConfig) =>
 
           yield* Effect.log("Deno sandbox created", { id: sb.id });
 
-          // Create a REPL for stateful eval across calls
-          const repl = yield* Effect.tryPromise({
-            try: () => sb.deno.repl(),
-            catch: (e) =>
-              new SandboxError({
-                message: `Failed to create REPL: ${e}`,
-                cause: e,
-              }),
-          });
+          // REPL ref — created eagerly via initRepl(), but *after*
+          // deps are installed so module resolution sees them.
+          const replRef = yield* Ref.make<Option.Option<DenoRepl>>(
+            Option.none(),
+          );
+
+          const initRepl = () =>
+            Effect.gen(function* () {
+              const repl = yield* Effect.tryPromise({
+                try: () => sb.deno.repl(),
+                catch: (e) =>
+                  new SandboxError({
+                    message: `Failed to create REPL: ${e}`,
+                    cause: e,
+                  }),
+              });
+              yield* Ref.set(replRef, Option.some(repl));
+            });
 
           const evalCode = (
             code: string,
           ): Effect.Effect<SandboxResult, SandboxError> =>
-            Effect.tryPromise({
-              try: async () => {
-                const result = await repl.eval(code);
-
+            Effect.gen(function* () {
+              const maybeRepl = yield* Ref.get(replRef);
+              if (Option.isNone(maybeRepl)) {
                 return {
-                  success: true as const,
-                  result,
+                  success: false as const,
+                  error: "REPL not initialised — call initRepl() first",
                   stdout: "",
                 };
-              },
-              catch: (e) => {
-                const errorMsg = e instanceof Error ? e.message : String(e);
-                return new SandboxError({
-                  message: `Sandbox eval failed: ${errorMsg}`,
+              }
+              return yield* Effect.tryPromise({
+                try: async () => {
+                  const result = await maybeRepl.value.eval(code);
+                  return { success: true as const, result, stdout: "" };
+                },
+                catch: (e) => {
+                  const errorMsg = e instanceof Error ? e.message : String(e);
+                  return new SandboxError({
+                    message: `Sandbox eval failed: ${errorMsg}`,
+                    cause: e,
+                  });
+                },
+              }).pipe(
+                Effect.catchAll((error) =>
+                  Effect.succeed({
+                    success: false as const,
+                    error: error.message,
+                    stdout: "",
+                  }),
+                ),
+              );
+            });
+
+          const writeTextFile = (path: string, content: string) =>
+            Effect.tryPromise({
+              try: () => sb.fs.writeTextFile(path, content),
+              catch: (e) =>
+                new SandboxError({
+                  message: `writeTextFile failed: ${e}`,
                   cause: e,
-                });
-              },
-            }).pipe(
-              Effect.catchAll((error) =>
-                Effect.succeed({
-                  success: false as const,
-                  error: error.message,
-                  stdout: "",
                 }),
-              ),
-            );
+            });
+
+          const readTextFile = (path: string) =>
+            Effect.tryPromise({
+              try: () => sb.fs.readTextFile(path),
+              catch: (e) =>
+                new SandboxError({
+                  message: `readTextFile failed: ${e}`,
+                  cause: e,
+                }),
+            });
+
+          const sh = (command: string) =>
+            Effect.tryPromise({
+              try: async () => {
+                // Pass command as a raw template literal string part (not interpolated value)
+                // to avoid shell-escaping the entire command as a single token.
+                const tpl = Object.assign([command], { raw: [command] });
+                const result = await sb
+                  .sh(tpl as unknown as TemplateStringsArray)
+                  .stdout("piped")
+                  .stderr("piped")
+                  .noThrow();
+                return {
+                  stdout: result.stdoutText ?? "",
+                  stderr: result.stderrText ?? "",
+                  exitCode: result.status.code,
+                } satisfies ShellResult;
+              },
+              catch: (e) =>
+                new SandboxError({
+                  message: `sh failed: ${e}`,
+                  cause: e,
+                }),
+            });
 
           return {
+            initRepl,
             eval: evalCode,
+            writeTextFile,
+            readTextFile,
+            sh,
             _sandbox: sb,
-            _repl: repl,
-          } satisfies SandboxHandle & {
-            _sandbox: Sandbox;
-            _repl: Awaited<ReturnType<Sandbox["deno"]["repl"]>>;
-          };
+          } satisfies SandboxHandle & { _sandbox: Sandbox };
         }),
         (handle) =>
           Effect.gen(function* () {
@@ -316,9 +370,14 @@ export const makeDenoProvider = (sandboxConfig: SandboxConfig) =>
       });
 
     const deleteSnapshot = (slug: string) =>
-      Effect.logError(
-        `Deno SDK does not support snapshot deletion. Please delete snapshot '${slug}' manually via the Deno dashboard.`,
-      );
+      Effect.tryPromise({
+        try: () => client.snapshots.delete(slug),
+        catch: (e) =>
+          new SandboxError({
+            message: `Failed to delete snapshot '${slug}': ${e}`,
+            cause: e,
+          }),
+      });
 
     return {
       createSandbox,

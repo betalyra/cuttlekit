@@ -493,6 +493,29 @@ const UnifiedResponseSchema = z.union([
 
 ---
 
+## Step 26: Sandbox Code Execution
+
+**Problem:** To build data-driven UIs (dashboards, issue trackers), the AI needs to call external APIs. MCP was considered but rejected — it exposes too many tools, floods the context with schema definitions, and gives the LLM decision fatigue over which tool to call.
+
+**Solution:** Sandboxed TypeScript execution. The AI writes and runs code against SDKs in a secure sandbox, using the same language it already knows.
+
+**What we built:**
+- **SDK documentation search** — Indexed docs are searchable, so the AI learns the API before writing code. Previously saved code modules also appear in search results, creating a knowledge feedback loop
+- **Pre-installed snapshots** — Deno Deploy snapshots with SDK dependencies pre-installed. No npm install at request time
+- **Per-session sandboxes** — Each session gets an isolated sandbox with its own REPL. Variables persist across tool calls within a request
+- **Persistent volumes** — `/workspace/` is volume-mounted and survives across requests. Reusable code (API clients, helpers) is saved here
+- **Provider abstraction** — Sandbox operations (eval, file I/O, shell) are abstracted behind a provider-agnostic interface. Prompt contains no Deno-specific references
+
+**Speed strategy (informed by benchmarks):**
+- Inline eval is fastest for first response (~400ms)
+- File writes are cheap (~49ms) and can run in parallel
+- Importing pre-saved code from `/workspace/` is as fast as inline eval (~405ms)
+- **Therefore:** AI uses inline code for immediate data fetching, then persists reusable code to `/workspace/` after emitting the UI. Subsequent requests import from `/workspace/`
+
+**Result:** AI builds data-driven UIs by calling real APIs. Compact tool set (5 tools) vs. MCP's unbounded tool surface. Fast first response, faster subsequent requests via persisted code.
+
+---
+
 ## Key Takeaways
 
 1. **Plain HTML over JSX** - AI can steer a responsive frontend by generating plain HTML

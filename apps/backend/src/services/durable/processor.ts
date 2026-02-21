@@ -1,4 +1,4 @@
-import { Effect, Stream, Queue, PubSub, Chunk, Ref, Option, pipe } from "effect";
+import { Effect, Stream, Queue, PubSub, Chunk, Ref, pipe } from "effect";
 import { UIService } from "../ui.js";
 import { DurableEventLog } from "./event-log.js";
 import {
@@ -7,13 +7,13 @@ import {
   type StreamEvent,
   type StreamEventWithOffset,
 } from "./types.js";
-import type { ManagedSandbox } from "../sandbox/manager.js";
+import type { SandboxContext } from "../sandbox/manager.js";
 
 export const runProcessingLoop = (
   sessionId: string,
   actionQueue: Queue.Queue<Action>,
   eventPubSub: PubSub.PubSub<StreamEventWithOffset>,
-  sandboxRef: Ref.Ref<Option.Option<ManagedSandbox>>,
+  sandboxCtx: SandboxContext,
 ) =>
   Effect.gen(function* () {
     const uiService = yield* UIService;
@@ -46,7 +46,7 @@ export const runProcessingLoop = (
           sessionId,
           actions,
           modelId,
-          sandboxRef,
+          sandboxCtx,
         });
 
         yield* pipe(

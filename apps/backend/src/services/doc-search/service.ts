@@ -12,7 +12,7 @@ import { ChunkingService, type DocChunkInput } from "./chunking.js";
 // ============================================================
 
 export type DocSearchResult = {
-  readonly type: "doc" | "module";
+  readonly type: "doc";
   readonly heading: string;
   readonly content: string;
   readonly package: string;
@@ -156,8 +156,8 @@ export class DocSearchService extends Effect.Service<DocSearchService>()(
       const { model: embeddingModel, providerOptions } =
         yield* EmbeddingModelProvider;
 
-      // Startup: index all configured doc URLs (only when sandbox is enabled)
-      if (sandboxConfig?.enabled) {
+      // Startup: index all configured doc URLs (only when sandbox is configured)
+      if (sandboxConfig) {
         yield* Effect.log("DocSearch: indexing", {
           packages: sandboxConfig.dependencies.map((d) => d.package),
         });
@@ -188,8 +188,6 @@ export class DocSearchService extends Effect.Service<DocSearchService>()(
         query: string,
         options?: {
           package?: string;
-          sessionId?: string;
-          volumeSlug?: string;
           limit?: number;
         },
       ) =>
@@ -202,40 +200,19 @@ export class DocSearchService extends Effect.Service<DocSearchService>()(
           );
           const vectorJson = JSON.stringify(embedding);
 
-          // Always search SDK docs
           const docRows = yield* store.searchDocChunksByVector(
             vectorJson,
             limit,
             options?.package,
           );
 
-          const results: DocSearchResult[] = docRows.map((row) => ({
+          return docRows.map((row) => ({
             type: "doc" as const,
             heading: row.heading,
             content: row.content,
             package: row.package,
             url: row.url,
-          }));
-
-          // If session has a live volume, also search code modules
-          if (options?.sessionId && options?.volumeSlug) {
-            const moduleRows = yield* store.searchCodeModulesByVector(
-              vectorJson,
-              options.sessionId,
-              3,
-            );
-
-            const moduleResults: DocSearchResult[] = moduleRows.map((row) => ({
-              type: "module" as const,
-              heading: row.path,
-              content: row.usage,
-              package: "session",
-            }));
-
-            return [...results, ...moduleResults];
-          }
-
-          return results;
+          })) satisfies DocSearchResult[];
         });
 
       // ----------------------------------------------------------
@@ -243,62 +220,21 @@ export class DocSearchService extends Effect.Service<DocSearchService>()(
       // ----------------------------------------------------------
 
       const listPackages = () =>
-        sandboxConfig?.enabled
+        sandboxConfig
           ? sandboxConfig.dependencies.map((d) => d.package)
           : [];
 
       const listPackageInfo = () =>
-        sandboxConfig?.enabled
+        sandboxConfig
           ? sandboxConfig.dependencies.map((d) => ({
               package: d.package,
               envVar: d.secretEnv,
             }))
           : [];
 
-      // ----------------------------------------------------------
-      // upsertCodeModule — called from stream finalizer
-      // ----------------------------------------------------------
-
-      const upsertCodeModule = (module: {
-        sessionId: string;
-        volumeSlug: string;
-        path: string;
-        description: string;
-        exports: string[];
-        usage: string;
-      }) =>
-        Effect.gen(function* () {
-          const embedding = yield* embedText(
-            `${module.path}: ${module.description}`,
-            embeddingModel,
-            providerOptions,
-          );
-
-          const id = yield* Effect.promise(() =>
-            makeChunkId(module.sessionId, module.path),
-          );
-
-          yield* store.upsertCodeModule({
-            id,
-            sessionId: module.sessionId,
-            volumeSlug: module.volumeSlug,
-            path: module.path,
-            description: module.description,
-            exports: module.exports,
-            usage: module.usage,
-            embedding,
-            createdAt: Date.now(),
-          });
-        });
-
       yield* Effect.log("DocSearchService initialized");
 
-      return {
-        search,
-        listPackages,
-        listPackageInfo,
-        upsertCodeModule,
-      };
+      return { search, listPackages, listPackageInfo };
     }),
   },
 ) {}

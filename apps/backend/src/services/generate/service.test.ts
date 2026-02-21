@@ -8,13 +8,12 @@ import { PromptLogger } from "./prompt-logger.js";
 import { TestLanguageModelLayer } from "@betalyra/generative-ui-common/server";
 import { PatchValidator } from "../vdom/index.js";
 import { MemoryService } from "../memory/index.js";
-import { StoreService } from "../memory/store.js";
 import { ModelRegistry } from "../model-registry.js";
 import { ToolService } from "./tools.js";
 import { DocSearchService } from "../doc-search/service.js";
 import { SandboxService } from "../sandbox/service.js";
 import type { SandboxHandle } from "../sandbox/types.js";
-import type { SandboxManagerInstance, ManagedSandbox } from "../sandbox/manager.js";
+import type { SandboxManagerInstance, ManagedSandbox, SandboxContext } from "../sandbox/manager.js";
 import type { SandboxConfig } from "../app-config.js";
 
 // ============================================================
@@ -120,13 +119,12 @@ const createTestLayer = (mockModel: ReturnType<typeof createMockModel>) =>
 // ============================================================
 
 const mockSandboxConfig: SandboxConfig = {
-  enabled: true,
   provider: "deno",
   mode: "lazy",
   region: "ord",
-  volumeTtlMinutes: 60,
-  volumeCapacityMb: 256,
+  useSnapshots: true,
   snapshotCapacityMb: 10000,
+  volumeCapacityMb: 5000,
   timeoutSeconds: 30,
   memoryMb: 512,
   dependencies: [{ package: "@linear/sdk", docs: [], secretEnv: undefined, secretValue: undefined, hosts: [] }],
@@ -139,56 +137,27 @@ const makeMockSandboxHandle = (
     stdout: "",
   },
 ): SandboxHandle => ({
+  initRepl: () => Effect.void,
   eval: () => Effect.succeed(evalResult),
+  writeTextFile: () => Effect.void,
+  readTextFile: () => Effect.succeed(""),
+  sh: () => Effect.succeed({ stdout: "", stderr: "", exitCode: 0 }),
 });
 
 const makeMockManager = (handle: SandboxHandle): SandboxManagerInstance => ({
-  ensureSnapshot: Effect.succeed({ slug: "snap-test" }),
-  getOrCreateSandbox: (_sessionId, sandboxRef, _volumeSlug) =>
+  ensureSnapshot: Effect.succeed(Option.some({ slug: "snap-test" })),
+  getOrCreateSandbox: (_sessionId, ctx: SandboxContext) =>
     Effect.gen(function* () {
-      // Simulate caching in the ref like the real manager does
-      const existing = yield* Ref.get(sandboxRef);
+      const existing = yield* Ref.get(ctx.ref);
       if (Option.isSome(existing)) return existing.value.handle;
-      yield* Ref.set(sandboxRef, Option.some({ handle, scope: {} } as ManagedSandbox));
+      yield* Ref.set(ctx.ref, Option.some({ handle, scope: {} } as ManagedSandbox));
       return handle;
     }),
-  releaseSandbox: (sandboxRef) => Ref.set(sandboxRef, Option.none()),
-  volumeExists: () => Effect.succeed(true),
-  createVolume: (sessionId) => Effect.succeed(`genui-session-${sessionId}`),
-  deleteVolume: () => Effect.void,
+  releaseSandbox: (ctx: SandboxContext) => Ref.set(ctx.ref, Option.none()),
   config: mockSandboxConfig,
 });
 
 type CallLog = Array<{ method: string; args: unknown[] }>;
-
-const makeMockStoreLayer = (callLog: CallLog) => {
-  let volumeRegistered = false;
-
-  return Layer.succeed(StoreService, {
-    getSessionVolume: (sessionId: string) => {
-      callLog.push({ method: "getSessionVolume", args: [sessionId] });
-      // After registerVolume is called, return the volume
-      return Effect.succeed(
-        volumeRegistered
-          ? { sessionId, volumeSlug: `genui-session-${sessionId}`, region: "ord", createdAt: Date.now(), lastAccessedAt: Date.now() }
-          : null,
-      );
-    },
-    registerVolume: (sessionId: string, slug: string, region: string) => {
-      callLog.push({ method: "registerVolume", args: [sessionId, slug, region] });
-      volumeRegistered = true;
-      return Effect.void;
-    },
-    touchVolume: (sessionId: string) => {
-      callLog.push({ method: "touchVolume", args: [sessionId] });
-      return Effect.void;
-    },
-    deleteVolumeRegistry: (sessionId: string) => {
-      callLog.push({ method: "deleteVolumeRegistry", args: [sessionId] });
-      return Effect.void;
-    },
-  } as unknown as StoreService);
-};
 
 const makeMockDocSearchLayer = (callLog: CallLog) =>
   Layer.succeed(DocSearchService, {
@@ -200,7 +169,6 @@ const makeMockDocSearchLayer = (callLog: CallLog) =>
     },
     listPackages: () => ["@linear/sdk"],
     listPackageInfo: () => [{ package: "@linear/sdk", envVar: "LINEAR_API_KEY" }],
-    upsertCodeModule: () => Effect.void,
   } as unknown as DocSearchService);
 
 const makeMockSandboxServiceLayer = (manager: SandboxManagerInstance | null) =>
@@ -222,7 +190,6 @@ const createToolTestLayer = (
     Layer.provide(
       ToolService.Default.pipe(
         Layer.provide(makeMockDocSearchLayer(callLog)),
-        Layer.provide(makeMockStoreLayer(callLog)),
         Layer.provide(makeMockSandboxServiceLayer(manager)),
       ),
     ),
@@ -362,68 +329,6 @@ describe("GenerateService", () => {
 
         // search_docs was called
         expect(callLog.some((c) => c.method === "search")).toBe(true);
-
-        // Volume was created (getSessionVolume returned null → createVolume → registerVolume)
-        expect(callLog.some((c) => c.method === "registerVolume")).toBe(true);
-        expect(callLog.some((c) => c.method === "touchVolume")).toBe(true);
-      })
-    );
-
-    it.effect("search_docs → run_code → code_modules + patches", () =>
-      Effect.gen(function* () {
-        const callLog: CallLog = [];
-        const handle = makeMockSandboxHandle();
-        const manager = makeMockManager(handle);
-
-        const model = new MockLanguageModelV3({
-          doStream: async function () {
-            const step = model.doStreamCalls.length;
-            if (step === 1) {
-              return {
-                stream: makeStream([
-                  toolCall("search_docs", { query: "linear issues" }),
-                  finishToolCalls,
-                ]),
-                rawCall: { rawPrompt: null, rawSettings: {} },
-              };
-            } else if (step === 2) {
-              return {
-                stream: makeStream([
-                  toolCall("run_code", { code: "Deno.writeTextFile('lib/linear.ts', '...')", description: "save module" }, "call-2"),
-                  finishToolCalls,
-                ]),
-                rawCall: { rawPrompt: null, rawSettings: {} },
-              };
-            } else {
-              // Step 2: code_modules + patches
-              return {
-                stream: makeStream([
-                  textDelta('{"type":"code_modules","modules":[{"path":"lib/linear.ts","description":"Linear API wrapper","exports":["getIssues"],"usage":"import { getIssues } from \'./lib/linear.ts\'"}]}\n', "t-0"),
-                  textDelta('{"type":"patches","patches":[{"selector":"#app","html":"<ul><li>ISS-1: Fix bug</li></ul>"}]}\n', "t-1"),
-                  finishStop,
-                ]),
-                rawCall: { rawPrompt: null, rawSettings: {} },
-              };
-            }
-          },
-        });
-
-        const layer = createToolTestLayer(model, callLog, manager);
-
-        const items = yield* Effect.gen(function* () {
-          const service = yield* GenerateService;
-          const stream = yield* service.streamUnified({
-            sessionId: "test-session",
-            currentHtml: '<div id="app">loading...</div>',
-            actions: [{ type: "prompt", prompt: "Show my Linear issues" }],
-          });
-          return yield* Stream.runCollect(stream).pipe(Effect.map(Chunk.toArray));
-        }).pipe(Effect.provide(layer));
-
-        // Both code_modules and patches appear in stream
-        expect(items.some((i) => i.type === "code_modules")).toBe(true);
-        expect(items.some((i) => i.type === "patches")).toBe(true);
-        expect(items.some((i) => i.type === "stats")).toBe(true);
       })
     );
 
@@ -484,94 +389,6 @@ describe("GenerateService", () => {
         // Stream still completes with patches
         expect(items.some((i) => i.type === "patches")).toBe(true);
         expect(items.some((i) => i.type === "stats")).toBe(true);
-
-        // No volume operations attempted
-        expect(callLog.some((c) => c.method === "registerVolume")).toBe(false);
-      })
-    );
-
-    it.effect("stale volume is cleaned up during search_docs", () =>
-      Effect.gen(function* () {
-        const callLog: CallLog = [];
-        const handle = makeMockSandboxHandle();
-        const staleManager: SandboxManagerInstance = {
-          ...makeMockManager(handle),
-          volumeExists: () => Effect.succeed(false), // Volume is stale
-        };
-
-        // Override store to always return a stale volume entry
-        const staleStoreLayer = Layer.succeed(StoreService, {
-          getSessionVolume: (sessionId: string) => {
-            callLog.push({ method: "getSessionVolume", args: [sessionId] });
-            return Effect.succeed({
-              sessionId,
-              volumeSlug: "old-stale-vol",
-              region: "ord",
-              createdAt: Date.now(),
-              lastAccessedAt: Date.now(),
-            });
-          },
-          registerVolume: (_sid: string, _slug: string, _region: string) => Effect.void,
-          touchVolume: () => Effect.void,
-          deleteVolumeRegistry: (sessionId: string) => {
-            callLog.push({ method: "deleteVolumeRegistry", args: [sessionId] });
-            return Effect.void;
-          },
-        } as unknown as StoreService);
-
-        const model = new MockLanguageModelV3({
-          doStream: async function () {
-            const step = model.doStreamCalls.length;
-            if (step === 1) {
-              return {
-                stream: makeStream([
-                  toolCall("search_docs", { query: "linear" }),
-                  finishToolCalls,
-                ]),
-                rawCall: { rawPrompt: null, rawSettings: {} },
-              };
-            } else {
-              return {
-                stream: makeStream([
-                  textDelta('{"type":"patches","patches":[{"selector":"#app","text":"Done"}]}\n'),
-                  finishStop,
-                ]),
-                rawCall: { rawPrompt: null, rawSettings: {} },
-              };
-            }
-          },
-        });
-
-        const layer = GenerateService.Default.pipe(
-          Layer.provide(TestLanguageModelLayer(model)),
-          Layer.provide(MockMemoryLayer),
-          Layer.provide(PatchValidator.Default),
-          Layer.provide(MockPromptLoggerLayer),
-          Layer.provide(MockModelRegistryLayer),
-          Layer.provide(
-            ToolService.Default.pipe(
-              Layer.provide(makeMockDocSearchLayer(callLog)),
-              Layer.provide(staleStoreLayer),
-              Layer.provide(makeMockSandboxServiceLayer(staleManager)),
-            ),
-          ),
-        );
-
-        const items = yield* Effect.gen(function* () {
-          const service = yield* GenerateService;
-          const stream = yield* service.streamUnified({
-            sessionId: "test-session",
-            currentHtml: '<div id="app">old</div>',
-            actions: [{ type: "prompt", prompt: "Search docs" }],
-          });
-          return yield* Stream.runCollect(stream).pipe(Effect.map(Chunk.toArray));
-        }).pipe(Effect.provide(layer));
-
-        // Stale volume was cleaned up
-        expect(callLog.some((c) => c.method === "deleteVolumeRegistry")).toBe(true);
-
-        // Stream still completed
-        expect(items.some((i) => i.type === "patches")).toBe(true);
       })
     );
   });

@@ -1,7 +1,6 @@
 import { z } from "zod";
-import type { Option, Ref } from "effect";
 import type { Action } from "@betalyra/generative-ui-common/client";
-import type { ManagedSandbox } from "../sandbox/manager.js";
+import type { SandboxContext } from "../sandbox/manager.js";
 
 // ============================================================
 // Zod Schemas
@@ -21,16 +20,6 @@ export const PatchSchema = z.union([
 
 export const PatchArraySchema = z.array(PatchSchema);
 
-// Code module summary — emitted by LLM at end of stream
-export const CodeModuleSummarySchema = z.object({
-  path: z.string(),
-  description: z.string(),
-  exports: z.array(z.string()),
-  usage: z.string(),
-});
-
-export type CodeModuleSummary = z.infer<typeof CodeModuleSummarySchema>;
-
 // Schema for LLM responses
 export const LLMResponseSchema = z.union([
   z.object({
@@ -40,10 +29,6 @@ export const LLMResponseSchema = z.union([
   z.object({
     type: z.literal("full"),
     html: z.string(),
-  }),
-  z.object({
-    type: z.literal("code_modules"),
-    modules: z.array(CodeModuleSummarySchema),
   }),
 ]);
 
@@ -70,7 +55,7 @@ export type UnifiedGenerateOptions = {
   currentHtml?: string;
   actions: readonly Action[];
   modelId?: string;
-  sandboxRef?: Ref.Ref<Option.Option<ManagedSandbox>>;
+  sandboxCtx?: SandboxContext;
 };
 
 // ============================================================

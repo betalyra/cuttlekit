@@ -14,24 +14,50 @@ export type SandboxResult =
     };
 
 // ============================================================
+// Shell result
+// ============================================================
+
+export type ShellResult = {
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly exitCode: number;
+};
+
+// ============================================================
 // Sandbox handle — provider-agnostic interface
 // ============================================================
 
 export type SandboxHandle = {
+  /** Initialise the REPL. Call AFTER dependencies are installed. */
+  readonly initRepl: () => Effect.Effect<void, SandboxError>;
   readonly eval: (code: string) => Effect.Effect<SandboxResult, SandboxError>;
+  readonly writeTextFile: (
+    path: string,
+    content: string,
+  ) => Effect.Effect<void, SandboxError>;
+  readonly readTextFile: (
+    path: string,
+  ) => Effect.Effect<string, SandboxError>;
+  readonly sh: (
+    command: string,
+  ) => Effect.Effect<ShellResult, SandboxError>;
 };
 
 // ============================================================
-// Volume / snapshot references
+// Snapshot references
+// ============================================================
+
+export type SnapshotRef = {
+  readonly slug: string;
+};
+
+// ============================================================
+// Volume references (kept for future use)
 // ============================================================
 
 export type VolumeRef = {
   readonly slug: string;
   readonly region: string;
-};
-
-export type SnapshotRef = {
-  readonly slug: string;
 };
 
 // ============================================================
@@ -46,7 +72,6 @@ export type SandboxSecret = {
 
 export type CreateSandboxOptions = {
   readonly snapshot?: SnapshotRef;
-  readonly volume?: VolumeRef;
   readonly secrets: ReadonlyArray<SandboxSecret>;
   readonly region: string;
 };
