@@ -45,30 +45,36 @@ export const runProcessingLoop = (
           ),
         });
 
-        const stream = yield* uiService.generateStream({
-          sessionId,
-          actions,
-          modelId,
-          sandboxCtx,
-        });
+        yield* Effect.gen(function* () {
+          const stream = yield* uiService.generateStream({
+            sessionId,
+            actions,
+            modelId,
+            sandboxCtx,
+          });
 
-        yield* pipe(
-          stream,
-          Stream.mapEffect((event: StreamEvent) =>
-            Effect.gen(function* () {
-              const offset = yield* Ref.updateAndGet(offsetRef, (n) => n + 1);
-              const eventWithOffset = { ...event, offset };
+          yield* pipe(
+            stream,
+            Stream.mapEffect((event: StreamEvent) =>
+              Effect.gen(function* () {
+                const offset = yield* Ref.updateAndGet(offsetRef, (n) => n + 1);
+                const eventWithOffset = { ...event, offset };
 
-              // Publish to PubSub first for low-latency delivery
-              yield* PubSub.publish(eventPubSub, eventWithOffset);
+                // Publish to PubSub first for low-latency delivery
+                yield* PubSub.publish(eventPubSub, eventWithOffset);
 
-              // Then persist to durable log
-              yield* eventLog.append(sessionId, offset, event);
+                // Then persist to durable log
+                yield* eventLog.append(sessionId, offset, event);
 
-              return eventWithOffset;
-            })
-          ),
-          Stream.runDrain
+                return eventWithOffset;
+              })
+            ),
+            Stream.runDrain
+          );
+        }).pipe(
+          Effect.withSpan("generation.total", {
+            attributes: { sessionId, actionCount: actions.length },
+          }),
         );
       }).pipe(
         Effect.catchAllCause((cause) =>

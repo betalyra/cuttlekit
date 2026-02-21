@@ -57,9 +57,10 @@ export const buildSandboxPrompt = (deps: PackageInfo[]): string => {
   const hasEnvVars = deps.some((d) => d.envVar);
 
   return `\n\nSANDBOX: Execute TypeScript in a sandboxed environment.
-Packages: ${pkgList}${hasEnvVars ? "\nAPI keys auto-injected — use process.env.VAR_NAME" : ""}
+Packages: ${pkgList}${hasEnvVars ? "\nAPI keys pre-configured — use process.env.VAR_NAME directly. Never check/test API keys." : ""}
 
-TOOLS: search_docs (search SDK docs), run_code (stateful TypeScript REPL), write_file, read_file, sh (shell).
+TOOLS: search_docs (search SDK docs), run_code (stateful TypeScript REPL — returns {success, result, stdout}), write_file, read_file, sh (shell).
+run_code result field = last expression value. Use top-level await. Do NOT retry if you got data back.
 
 When the user asks for something that requires data, you MUST use tools. Never stop after just emitting a loading state.
 

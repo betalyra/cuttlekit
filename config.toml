@@ -29,7 +29,7 @@ label = "Gemini 3 Flash"
 [sandbox]
 provider = "deno"
 init_mode = "lazy"
-sandbox_scope = "user"       # "user" (default) or "session"
+sandbox_scope = "user" # "user" (default) or "session"
 
 [sandbox.deno]
 region = "ams"               # amsterdam is fastest region

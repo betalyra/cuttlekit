@@ -1,5 +1,5 @@
 import { Effect, Stream, pipe, DateTime, Duration, Ref, Option } from "effect";
-import { streamText } from "ai";
+import { streamText, type TextStreamPart } from "ai";
 import {
   LanguageModelProvider,
   type LanguageModelConfig,
@@ -106,6 +106,10 @@ export class GenerateService extends Effect.Service<GenerateService>()(
       ): Stream.Stream<UnifiedResponse, GenerationError | Error> =>
         Stream.unwrap(
           Effect.gen(function* () {
+            // TTFT tracking
+            const streamStartTime = yield* DateTime.now;
+            const firstTokenSeen = yield* Ref.make(false);
+
             const result = streamText({
               model: modelConfig.model,
               messages: messages as Message[],
@@ -129,39 +133,69 @@ export class GenerateService extends Effect.Service<GenerateService>()(
             return pipe(
               fullStream,
               // Extract text from text-delta, track usage from finish
-              Stream.mapEffect((part) =>
+              Stream.mapEffect((part: TextStreamPart<SandboxTools>) =>
                 Effect.gen(function* () {
-                  // Cast to access raw data - AI SDK types are incomplete
-                  const raw = part as Record<string, unknown>;
-
                   // Capture usage from finish-step using provider-specific extractor
-                  if (raw.type === "finish-step") {
-                    if (raw.usage) {
-                      const extracted = modelConfig.extractUsage(raw.usage);
-                      yield* Ref.update(usageRef, (usages) => [
-                        ...usages,
-                        {
-                          inputTokens: extracted.inputTokens,
-                          outputTokens: extracted.outputTokens,
-                          totalTokens: extracted.totalTokens,
-                          inputTokenDetails: {
-                            cacheReadTokens: extracted.cachedTokens,
-                          },
+                  if (part.type === "finish-step") {
+                    const extracted = modelConfig.extractUsage(
+                      part.usage as Record<string, unknown>,
+                    );
+                    yield* Ref.update(usageRef, (usages) => [
+                      ...usages,
+                      {
+                        inputTokens: extracted.inputTokens,
+                        outputTokens: extracted.outputTokens,
+                        totalTokens: extracted.totalTokens,
+                        inputTokenDetails: {
+                          cacheReadTokens: extracted.cachedTokens,
                         },
-                      ]);
-                    }
+                      },
+                    ]);
                     return null;
                   }
 
-                  if (raw.type === "finish") {
-                    return null; // Skip finish, we already captured from finish-step
+                  if (part.type === "finish") {
+                    return null;
                   }
 
-                  if (raw.type === "text-delta") {
-                    return (raw as { text: string }).text;
+                  // Log tool calls and results for observability
+                  if (part.type === "tool-call") {
+                    const inputStr = JSON.stringify(part.input) ?? "";
+                    yield* Effect.log("Tool call", {
+                      tool: part.toolName,
+                      args: inputStr.slice(0, 200),
+                    });
+                    return null;
                   }
 
-                  return null; // Ignore other event types
+                  if (part.type === "tool-result") {
+                    const outputStr = JSON.stringify(part.output) ?? "";
+                    yield* Effect.log("Tool result", {
+                      tool: part.toolName,
+                      resultPreview: outputStr.slice(0, 300),
+                      resultLength: outputStr.length,
+                    });
+                    return null;
+                  }
+
+                  if (part.type === "text-delta") {
+                    const alreadySeen = yield* Ref.getAndSet(
+                      firstTokenSeen,
+                      true,
+                    );
+                    if (!alreadySeen) {
+                      const now = yield* DateTime.now;
+                      const ttft = Duration.toMillis(
+                        DateTime.distanceDuration(streamStartTime, now),
+                      );
+                      yield* Effect.log("Time to first token", {
+                        ttft_ms: ttft,
+                      });
+                    }
+                    return part.text;
+                  }
+
+                  return null;
                 }),
               ),
               // Filter out nulls (non-text events)
@@ -485,7 +519,14 @@ export class GenerateService extends Effect.Service<GenerateService>()(
           );
 
           return pipe(contentStream, Stream.concat(statsStream));
-        });
+        }).pipe(
+          Effect.withSpan("generate.streamUnified", {
+            attributes: {
+              sessionId: options.sessionId,
+              actionCount: options.actions.length,
+            },
+          }),
+        );
 
       return { streamUnified };
     }),
