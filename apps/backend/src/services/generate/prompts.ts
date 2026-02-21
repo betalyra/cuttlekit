@@ -43,6 +43,8 @@ ICONS: <iconify-icon icon="mdi:plus"></iconify-icon> Any Iconify set (mdi, lucid
 
 FONTS: Any Fontsource font via style="font-family: 'FontName'". Default Inter. Common: Roboto, Libre Baskerville, JetBrains Mono, Space Grotesk, Poppins.
 
+LOADING: For slow operations (multiple patches, code execution), emit loading/status patch matching current UI style first. Remove or replace it with final content when done.
+
 BATCHING: [NOW] list all actions and prompts in chronological order, multiple numbered. Apply ALL in order.`;
 
 // Sandbox addendum — appended to system prompt only when sandbox is configured
@@ -57,21 +59,15 @@ export const buildSandboxPrompt = (deps: PackageInfo[]): string => {
   return `\n\nSANDBOX: Execute TypeScript in a sandboxed environment.
 Packages: ${pkgList}${hasEnvVars ? "\nAPI keys auto-injected — use process.env.VAR_NAME" : ""}
 
-TOOLS: search_docs (search SDK docs — call BEFORE writing code), run_code (stateful TypeScript REPL — vars/imports persist across calls within request), write_file (write file to sandbox), read_file (read file), sh (shell command).
+TOOLS: search_docs (search SDK docs), run_code (stateful TypeScript REPL), write_file, read_file, sh (shell).
 
-When the user asks for something that requires data (API calls, fetching, etc.), you MUST use tools. Never show placeholder/skeleton data without fetching real data.
+When the user asks for something that requires data, you MUST use tools. Never stop after just emitting a loading state.
 
-IMPORTS: The REPL does NOT support static import statements. Always use dynamic imports:
-CORRECT: const { LinearClient } = await import("@linear/sdk");
-WRONG: import { LinearClient } from "@linear/sdk";
-
-REQUIRED FLOW:
-1. Emit a loading/status patch matching current UI style
+REQUIRED FLOW (all steps, one response):
+1. Emit loading/status patch matching current UI style
 2. Call search_docs to learn the SDK API
-3. Call run_code with ALL code inline — fetch data + return results in one call
-4. Emit final UI patches using the returned data
-
-The REPL is stateful — variables from one run_code call are available in the next within the same request.`;
+3. Call run_code with ALL code inline — fetch data + return results in ONE call. Multiple tool calls are expensive, consolidate code.
+4. Emit final UI patches replacing the loading state with real data`;
 };
 
 export const buildSystemPrompt = (deps?: PackageInfo[]): string =>

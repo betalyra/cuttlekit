@@ -40,6 +40,9 @@ export const runProcessingLoop = (
           sessionId,
           count: actions.length,
           modelId,
+          actions: actions.map((a) =>
+            a.type === "prompt" ? `prompt: ${a.prompt}` : `action: ${a.action}`,
+          ),
         });
 
         const stream = yield* uiService.generateStream({
