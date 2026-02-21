@@ -7,6 +7,8 @@
         "dev": "tsx watch src/sandbox.ts",
         "sandbox": "tsx src/sandbox.ts",
         "agent": "tsx src/agent.ts",
+        "volume-test": "tsx src/volume-test.ts",
+        "eval-strategy": "tsx src/eval-strategy-test.ts",
         "vector-search": "tsx src/vector-search.ts",
         "build": "tsdown",
         "typecheck": "tsc --noEmit"

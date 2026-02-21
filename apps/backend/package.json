@@ -8,13 +8,14 @@
         "build": "tsdown",
         "test": "vitest",
         "typecheck": "tsc --noEmit",
-        "db:generate": "drizzle-kit generate",
-        "db:migrate": "drizzle-kit migrate",
-        "db:push": "drizzle-kit push",
-        "db:studio": "drizzle-kit studio"
+        "drizzle:generate": "drizzle-kit generate",
+        "drizzle:migrate": "drizzle-kit migrate",
+        "drizzle:push": "drizzle-kit push",
+        "drizzle:studio": "drizzle-kit studio"
     },
     "dependencies": {
         "@betalyra/generative-ui-common": "workspace:*",
+        "@deno/sandbox": "^0.8.0",
         "@libsql/client": "^0.17.0",
         "drizzle-orm": "^0.45.1",
         "smol-toml": "^1.6.0"

@@ -45,6 +45,30 @@ FONTS: Any Fontsource font via style="font-family: 'FontName'". Default Inter. C
 
 BATCHING: [NOW] list all actions and prompts in chronological order, multiple numbered. Apply ALL in order.`;
 
+// Sandbox addendum — appended to system prompt only when sandbox is configured
+export type PackageInfo = { package: string; envVar?: string };
+
+export const buildSandboxPrompt = (deps: PackageInfo[]): string => {
+  const pkgList = deps
+    .map((d) => (d.envVar ? `${d.package} (${d.envVar})` : d.package))
+    .join(", ");
+  const hasEnvVars = deps.some((d) => d.envVar);
+
+  return `\n\nSANDBOX: You have tools to run TypeScript code and search SDK docs.
+Packages: ${pkgList}${hasEnvVars ? "\n- API keys are auto-injected as env vars — use process.env.VAR_NAME in code" : ""}
+- Tool calls are expensive. Minimize calls: search once, then write+run code in a single run_code call
+- run_code uses a stateful REPL — variables persist across calls. You can also write files (Deno.writeTextFile) and import them in the same call
+- Call search_docs BEFORE writing code to learn the API
+- Call run_code to execute code against real APIs and use the result to build UI
+- Before calling tools, emit a brief loading/status patch that fits the current UI style
+- At the end, emit {"type":"code_modules","modules":[...]} for any reusable code you saved to the sandbox filesystem. Each module: {path, description, exports: string[], usage: "import ..."}`;
+};
+
+export const buildSystemPrompt = (deps?: PackageInfo[]): string =>
+  deps && deps.length > 0
+    ? STREAMING_PATCH_PROMPT + buildSandboxPrompt(deps)
+    : STREAMING_PATCH_PROMPT;
+
 // Build corrective prompt for retry after error
 export const buildCorrectivePrompt = (
   error: GenerationError,

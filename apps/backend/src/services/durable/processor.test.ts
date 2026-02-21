@@ -1,9 +1,13 @@
 import { describe, expect, it } from "@effect/vitest";
-import { Effect, Stream, Queue, PubSub, Layer, Fiber, Chunk, pipe } from "effect";
+import { Effect, Stream, Queue, PubSub, Layer, Fiber, Chunk, Ref, Option, pipe } from "effect";
 import { runProcessingLoop } from "./processor.js";
 import { DurableEventLog } from "./event-log.js";
 import { UIService } from "../ui.js";
+import type { ManagedSandbox } from "../sandbox/manager.js";
 import type { Action, StreamEvent, StreamEventWithOffset } from "./types.js";
+
+const makeSandboxRef = () =>
+  Ref.make<Option.Option<ManagedSandbox>>(Option.none());
 
 // ============================================================
 // Mock UIService — returns a fixed stream of events
@@ -75,10 +79,11 @@ describe("runProcessingLoop", () => {
 
         const actionQueue = yield* Queue.unbounded<Action>();
         const eventPubSub = yield* PubSub.unbounded<StreamEventWithOffset>();
+        const sandboxRef = yield* makeSandboxRef();
         const subscription = yield* PubSub.subscribe(eventPubSub);
 
         const fiber = yield* pipe(
-          runProcessingLoop("test-session", actionQueue, eventPubSub),
+          runProcessingLoop("test-session", actionQueue, eventPubSub, sandboxRef),
           Effect.provide(uiMock.layer),
           Effect.provide(eventLogMock.layer),
           Effect.fork
@@ -125,6 +130,8 @@ describe("runProcessingLoop", () => {
         const actionQueue = yield* Queue.unbounded<Action>();
         const eventPubSub = yield* PubSub.unbounded<StreamEventWithOffset>();
 
+        const sandboxRef = yield* makeSandboxRef();
+
         // Enqueue multiple actions BEFORE starting the loop
         yield* Queue.offer(actionQueue, {
           type: "prompt",
@@ -140,7 +147,7 @@ describe("runProcessingLoop", () => {
         });
 
         const fiber = yield* pipe(
-          runProcessingLoop("test-session", actionQueue, eventPubSub),
+          runProcessingLoop("test-session", actionQueue, eventPubSub, sandboxRef),
           Effect.provide(uiMock.layer),
           Effect.provide(eventLogMock.layer),
           Effect.fork
@@ -189,6 +196,7 @@ describe("runProcessingLoop", () => {
 
         const actionQueue = yield* Queue.unbounded<Action>();
         const eventPubSub = yield* PubSub.unbounded<StreamEventWithOffset>();
+        const sandboxRef = yield* makeSandboxRef();
 
         const subscription = yield* PubSub.subscribe(eventPubSub);
         yield* Effect.fork(
@@ -201,7 +209,7 @@ describe("runProcessingLoop", () => {
         );
 
         const fiber = yield* pipe(
-          runProcessingLoop("test-session", actionQueue, eventPubSub),
+          runProcessingLoop("test-session", actionQueue, eventPubSub, sandboxRef),
           Effect.provide(uiLayer),
           Effect.provide(eventLogLayer),
           Effect.fork
@@ -225,9 +233,10 @@ describe("runProcessingLoop", () => {
 
         const actionQueue = yield* Queue.unbounded<Action>();
         const eventPubSub = yield* PubSub.unbounded<StreamEventWithOffset>();
+        const sandboxRef = yield* makeSandboxRef();
 
         const fiber = yield* pipe(
-          runProcessingLoop("test-session", actionQueue, eventPubSub),
+          runProcessingLoop("test-session", actionQueue, eventPubSub, sandboxRef),
           Effect.provide(uiMock.layer),
           Effect.provide(eventLogMock.layer),
           Effect.fork
@@ -262,9 +271,10 @@ describe("runProcessingLoop", () => {
 
         const actionQueue = yield* Queue.unbounded<Action>();
         const eventPubSub = yield* PubSub.unbounded<StreamEventWithOffset>();
+        const sandboxRef = yield* makeSandboxRef();
 
         const fiber = yield* pipe(
-          runProcessingLoop("test-session", actionQueue, eventPubSub),
+          runProcessingLoop("test-session", actionQueue, eventPubSub, sandboxRef),
           Effect.provide(uiMock.layer),
           Effect.provide(eventLogMock.layer),
           Effect.fork

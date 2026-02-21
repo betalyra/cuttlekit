@@ -1,4 +1,4 @@
-import { Effect, Stream, pipe, DateTime, Duration, Ref } from "effect";
+import { Effect, Stream, pipe, DateTime, Duration, Ref, Option } from "effect";
 import { streamText } from "ai";
 import {
   LanguageModelProvider,
@@ -18,12 +18,14 @@ import {
   type Usage,
   type AggregatedUsage,
   MAX_RETRY_ATTEMPTS,
-  STREAMING_PATCH_PROMPT,
+  buildSystemPrompt,
   buildCorrectivePrompt,
   safeAsyncIterable,
   PromptLogger,
 } from "./index.js";
 import type { GenerationError } from "./errors.js";
+import { ToolService, TOOL_STEP_LIMIT, type SandboxTools } from "./tools.js";
+import type { ManagedSandbox } from "../sandbox/manager.js";
 
 export class GenerateService extends Effect.Service<GenerateService>()(
   "GenerateService",
@@ -35,6 +37,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
       const memory = yield* MemoryService;
       const patchValidator = yield* PatchValidator;
       const promptLogger = yield* PromptLogger;
+      const toolService = yield* ToolService;
 
       // ============================================================
       // Parse JSON line - fails with JsonParseError for retry
@@ -99,6 +102,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
         validationDoc: Document,
         usageRef: Ref.Ref<Usage[]>,
         modelConfig: LanguageModelConfig,
+        requestTools?: SandboxTools,
       ): Stream.Stream<UnifiedResponse, GenerationError | Error> =>
         Stream.unwrap(
           Effect.gen(function* () {
@@ -106,6 +110,11 @@ export class GenerateService extends Effect.Service<GenerateService>()(
               model: modelConfig.model,
               messages: messages as Message[],
               providerOptions: modelConfig.providerOptions,
+              ...(requestTools && {
+                tools: requestTools,
+                stopWhen: TOOL_STEP_LIMIT,
+                toolChoice: "auto",
+              }),
             });
 
             // Use fullStream to get both text AND usage events
@@ -177,6 +186,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
         modeRef: Ref.Ref<"patches" | "full">,
         attempt: number,
         modelConfig: LanguageModelConfig,
+        requestTools?: SandboxTools,
       ): Stream.Stream<UnifiedResponse, Error> => {
         if (attempt >= MAX_RETRY_ATTEMPTS) {
           return Stream.fail(
@@ -185,7 +195,13 @@ export class GenerateService extends Effect.Service<GenerateService>()(
         }
 
         return pipe(
-          createAttemptStream(messages, validationDoc, usageRef, modelConfig),
+          createAttemptStream(
+            messages,
+            validationDoc,
+            usageRef,
+            modelConfig,
+            requestTools,
+          ),
 
           // Track successful patches, mode, and log
           Stream.tap((response) =>
@@ -243,6 +259,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
                     modeRef,
                     attempt + 1,
                     modelConfig,
+                    requestTools,
                   ),
                 );
               }),
@@ -261,6 +278,26 @@ export class GenerateService extends Effect.Service<GenerateService>()(
           const modelConfig = options.modelId
             ? yield* modelRegistry.resolve(options.modelId)
             : defaultConfig;
+
+          // Build per-request sandbox tools (only when sandbox is configured)
+          // Reuse session-scoped sandboxRef (warm mode) or create fresh one (lazy)
+          const packageInfo = toolService.listPackageInfo();
+          const requestTools =
+            packageInfo.length > 0
+              ? yield* Effect.gen(function* () {
+                  const sandboxRef =
+                    options.sandboxRef ??
+                    (yield* Ref.make<Option.Option<ManagedSandbox>>(
+                      Option.none(),
+                    ));
+                  const runtime = yield* Effect.runtime<never>();
+                  return toolService.makeTools({
+                    sessionId,
+                    sandboxRef,
+                    runtime,
+                  });
+                })
+              : undefined;
 
           yield* Effect.log("Streaming unified response", {
             provider: modelConfig.providerName,
@@ -332,9 +369,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
               : `${i + 1}. Action: ${a.action} Data: ${JSON.stringify(a.actionData, null, 0)}`,
           );
           const actionPart =
-            actionLines.length > 0
-              ? `[NOW]\n${actionLines.join("\n")}`
-              : null;
+            actionLines.length > 0 ? `[NOW]\n${actionLines.join("\n")}` : null;
 
           // Message structure optimized for prompt caching:
           // 1. System prompt (static - always cached)
@@ -343,10 +378,17 @@ export class GenerateService extends Effect.Service<GenerateService>()(
             currentHtml ? `HTML:\n${currentHtml}` : null,
             ...historyParts,
             actionPart,
-          ].filter(Boolean).join("\n\n");
+          ]
+            .filter(Boolean)
+            .join("\n\n");
 
           const messages: readonly Message[] = [
-            { role: "system", content: STREAMING_PATCH_PROMPT },
+            {
+              role: "system",
+              content: buildSystemPrompt(
+                packageInfo.length > 0 ? packageInfo : undefined,
+              ),
+            },
             { role: "user", content: userContent },
           ];
 
@@ -373,6 +415,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
             modeRef,
             0,
             modelConfig,
+            requestTools,
           );
 
           // Stats stream runs AFTER content stream completes

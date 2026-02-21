@@ -4,8 +4,13 @@ import { Database } from "./database.js";
 import {
   sessions,
   sessionMemoryEntries,
+  docChunks,
+  codeModules,
+  sessionVolumes,
   type NewSession,
   type NewSessionMemoryEntry,
+  type NewDocChunk,
+  type NewCodeModule,
 } from "./schema.js";
 
 export class StoreService extends Effect.Service<StoreService>()(
@@ -125,6 +130,179 @@ export class StoreService extends Effect.Service<StoreService>()(
           }));
         });
 
+      // ============ DOC CHUNKS ============
+
+      const getDocChunkHash = (id: string) =>
+        Effect.gen(function* () {
+          const result = yield* Effect.promise(() =>
+            db
+              .select({ contentHash: docChunks.contentHash })
+              .from(docChunks)
+              .where(eq(docChunks.id, id)),
+          );
+          return result[0]?.contentHash ?? null;
+        });
+
+      const upsertDocChunk = (data: NewDocChunk) =>
+        Effect.promise(() =>
+          db
+            .insert(docChunks)
+            .values(data)
+            .onConflictDoUpdate({
+              target: docChunks.id,
+              set: {
+                content: data.content,
+                contentHash: data.contentHash,
+                embedding: data.embedding,
+                createdAt: data.createdAt,
+              },
+            }),
+        );
+
+      const searchDocChunksByVector = (
+        vectorJson: string,
+        limit: number,
+        pkg?: string,
+      ) =>
+        Effect.gen(function* () {
+          const packageFilter = pkg ? `AND dc.package = ?` : "";
+          const args = pkg
+            ? [vectorJson, vectorJson, limit * 2, pkg]
+            : [vectorJson, vectorJson, limit * 2];
+
+          const result = yield* Effect.promise(() =>
+            client.execute({
+              sql: `
+                SELECT
+                  dc.package,
+                  dc.heading,
+                  dc.content,
+                  dc.url,
+                  vector_distance_cos(dc.embedding, vector32(?)) as distance
+                FROM vector_top_k('doc_chunks_embedding_idx', vector32(?), ?) AS vt
+                JOIN doc_chunks dc ON dc.rowid = vt.id
+                WHERE 1=1 ${packageFilter}
+                ORDER BY distance ASC
+              `,
+              args,
+            }),
+          );
+
+          return result.rows.slice(0, limit).map((row) => ({
+            package: row.package as string,
+            heading: row.heading as string,
+            content: row.content as string,
+            url: row.url as string,
+            distance: row.distance as number,
+          }));
+        });
+
+      // ============ CODE MODULES ============
+
+      const upsertCodeModule = (data: NewCodeModule) =>
+        Effect.promise(() =>
+          db
+            .insert(codeModules)
+            .values(data)
+            .onConflictDoUpdate({
+              target: codeModules.id,
+              set: {
+                description: data.description,
+                exports: data.exports,
+                usage: data.usage,
+                embedding: data.embedding,
+                createdAt: data.createdAt,
+              },
+            }),
+        );
+
+      const searchCodeModulesByVector = (
+        vectorJson: string,
+        sessionId: string,
+        limit: number,
+      ) =>
+        Effect.gen(function* () {
+          const result = yield* Effect.promise(() =>
+            client.execute({
+              sql: `
+                SELECT
+                  cm.path,
+                  cm.description,
+                  cm.usage,
+                  vector_distance_cos(cm.embedding, vector32(?)) as distance
+                FROM vector_top_k('code_modules_embedding_idx', vector32(?), ?) AS vt
+                JOIN code_modules cm ON cm.rowid = vt.id
+                WHERE cm.session_id = ?
+                ORDER BY distance ASC
+              `,
+              args: [vectorJson, vectorJson, limit, sessionId],
+            }),
+          );
+
+          return result.rows.slice(0, limit).map((row) => ({
+            path: row.path as string,
+            description: row.description as string,
+            usage: row.usage as string,
+            distance: row.distance as number,
+          }));
+        });
+
+      // ============ SESSION VOLUMES ============
+
+      const getSessionVolume = (sessionId: string) =>
+        Effect.gen(function* () {
+          const result = yield* Effect.promise(() =>
+            db
+              .select()
+              .from(sessionVolumes)
+              .where(eq(sessionVolumes.sessionId, sessionId)),
+          );
+          return result[0] ?? null;
+        });
+
+      const registerVolume = (
+        sessionId: string,
+        volumeSlug: string,
+        region: string,
+      ) =>
+        Effect.promise(() =>
+          db
+            .insert(sessionVolumes)
+            .values({
+              sessionId,
+              volumeSlug,
+              region,
+              createdAt: Date.now(),
+              lastAccessedAt: Date.now(),
+            })
+            .onConflictDoUpdate({
+              target: sessionVolumes.sessionId,
+              set: { volumeSlug, region, lastAccessedAt: Date.now() },
+            }),
+        );
+
+      const touchVolume = (sessionId: string) =>
+        Effect.promise(() =>
+          db
+            .update(sessionVolumes)
+            .set({ lastAccessedAt: Date.now() })
+            .where(eq(sessionVolumes.sessionId, sessionId)),
+        );
+
+      const deleteVolumeRegistry = (sessionId: string) =>
+        Effect.gen(function* () {
+          yield* Effect.promise(() =>
+            db
+              .delete(codeModules)
+              .where(eq(codeModules.sessionId, sessionId)),
+          );
+          yield* Effect.promise(() =>
+            db
+              .delete(sessionVolumes)
+              .where(eq(sessionVolumes.sessionId, sessionId)),
+          );
+        });
+
       return {
         // Sessions
         insertSession,
@@ -137,6 +315,18 @@ export class StoreService extends Effect.Service<StoreService>()(
         insertMemoryEntry,
         getRecentEntries,
         searchByVector,
+        // Doc chunks
+        getDocChunkHash,
+        upsertDocChunk,
+        searchDocChunksByVector,
+        // Code modules
+        upsertCodeModule,
+        searchCodeModulesByVector,
+        // Session volumes
+        getSessionVolume,
+        registerVolume,
+        touchVolume,
+        deleteVolumeRegistry,
       };
     }),
   }

@@ -78,6 +78,9 @@ importers:
       '@betalyra/generative-ui-common':
         specifier: workspace:*
         version: link:../../packages/common
+      '@deno/sandbox':
+        specifier: ^0.8.0
+        version: 0.8.0
       '@libsql/client':
         specifier: ^0.17.0
         version: 0.17.0

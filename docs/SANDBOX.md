@@ -1,4 +1,4 @@
-# Sandbox Integration Plan
+# Sandbox Integration
 
 ## Goal
 
@@ -14,32 +14,30 @@ Give the LLM access to a secure code sandbox so it can execute TypeScript agains
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │                              config.toml                                      │
 │  [providers.groq]  [providers.google]  [sandbox]                              │
-│                                         ├── provider, mode, volume_ttl        │
+│                                         ├── enabled, provider, mode           │
 │                                         └── [[dependencies]] + docs + secrets │
 └──────┬──────────────┬──────────────────────────┬─────────────────────────────┘
        │              │                          │
        ▼              ▼                          ▼
 ┌────────────┐               ┌──────────────────────────────────────────────┐
-│ModelRegistry│               │            AppConfig.sandbox                 │
-│ (unchanged) │               └──────┬──────────────┬──────────────┬───────┘
-└──────┬─────┘                       │              │              │
-       │                   ┌─────────▼────┐  ┌──────▼───────┐ ┌───▼────────────┐
-       │                   │ SandboxManager│  │DocSearchSvc  │ │CodeModuleIndex │
-       │                   │ (per-session) │  │(global/shared)│ │(per-session)   │
-       │                   │              │  └──────┬───────┘ └───┬────────────┘
-       │                   │ snapshot ────►│        │              │
-       │                   │ volume ──────►│        │              │
-       │                   └──────┬───────┘        │              │
-       │                          │                │              │
-       ▼                          ▼                ▼              ▼
+│ModelRegistry│               │        AppConfig.sandbox: Option<Config>     │
+│ (unchanged) │               └──────┬──────────────┬──────────────────────┘
+└──────┬─────┘                       │              │
+       │                   ┌─────────▼────┐  ┌──────▼───────┐
+       │                   │ SandboxManager│  │DocSearchSvc  │
+       │                   │ (per-session) │  │(global/shared)│
+       │                   │ snapshot ────►│  └──────┬───────┘
+       │                   │ volume ──────►│         │
+       │                   └──────┬───────┘         │
+       │                          │                 │
+       ▼                          ▼                 ▼
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │                          GenerateService                                      │
+│  streamText({ model, messages, tools, stopWhen })                            │
 │                                                                               │
-│  streamText({ model, messages, tools, maxSteps })                             │
-│                                                                               │
-│  tools:                                                                       │
-│    search_docs ──► DocSearchSvc.search() + CodeModuleIndex.search()           │
-│    run_code ─────► SandboxManager.getOrCreate() → handle.eval()               │
+│  tools (conditional — only when sandbox.enabled):                            │
+│    search_docs ──► DocSearchSvc.search()                                     │
+│    run_code ─────► SandboxManager.getOrCreate() → handle.eval()              │
 │                                                                               │
 │  output: JSONL patches / full HTML  (unchanged pipeline)                      │
 │          + {"type":"code_modules",...}  (finalizer, saved to index)            │
@@ -49,7 +47,7 @@ Deno Infrastructure:
 
 ┌─────────────────────────────────────────┐
 │            Snapshot (immutable)           │
-│  Created at app startup                  │
+│  Created at app startup (always)         │
 │  Contains: all configured deps installed │
 │  Slug: "genui-deps-{configHash}"         │
 │  Shared across ALL session sandboxes     │
@@ -83,6 +81,7 @@ Turso DB:
 ```
  App Startup                              Deno
    │                                        │
+   │  sandbox.enabled == true?              │
    │  Hash sandbox config (deps+versions)   │
    │  Snapshot "genui-deps-{hash}" exists?  │
    │──── check ────────────────────────────►│
@@ -175,539 +174,298 @@ Turso DB:
 
 ---
 
-## 1. Config Extension
+## 1. Config
 
-Generalize `config.toml` and the loader (`model-config.ts` → `app-config.ts`) to cover both model providers and sandbox configuration.
+`config.toml` sandbox section. The entire section is optional — if absent, sandbox features are disabled.
 
 ```toml
-# config.toml (extended)
-
-default_model = "moonshotai/kimi-k2-instruct-0905"
-
-# --- Model providers (unchanged) ---
-[providers.groq]
-# ...
-
-# --- Sandbox ---
 [sandbox]
-provider = "deno"             # future: "e2b", "modal", etc.
-mode = "lazy"                 # "lazy" = create on first run_code | "warm" = create with session
-region = "ord"                # Deno region for sandbox + volumes
-volume_ttl_minutes = 30       # volume deleted after this many minutes of inactivity
+enabled = true               # explicit toggle — false disables all sandbox features
+provider = "deno"            # future: "e2b", "modal", etc.
+mode = "lazy"                # "lazy" = sandbox on first run_code | "warm" = sandbox with session
+region = "ord"               # Deno region for sandbox + volumes
+volume_ttl_minutes = 30      # volume deleted after this many minutes of inactivity
+volume_capacity_mb = 300     # volume capacity
+timeout_seconds = 300        # code execution timeout
+memory_mb = 1280             # sandbox memory limit
 
-# Provider-specific options (passed through to sandbox provider)
-[sandbox.options]
-# e.g. timeout, memory limits
-
-# Dependencies installed in every sandbox instance
 [[sandbox.dependencies]]
 package = "@linear/sdk"
 docs = ["https://linear.app/developers/sdk.md"]
-secret_env = "LINEAR_API_KEY"          # convention: read from env
-hosts = ["api.linear.app"]             # network allowlist for this secret
-
-[[sandbox.dependencies]]
-package = "@slack/web-api"
-docs = ["https://api.slack.com/methods"]
-secret_env = "SLACK_TOKEN"
-hosts = ["slack.com"]
+secret_env = "LINEAR_API_KEY"
+hosts = ["api.linear.app"]
 ```
 
-**Loader changes:**
-- Rename `model-config.ts` → `app-config.ts` (or add a `sandbox-config.ts` alongside)
-- New `SandboxConfig` type alongside existing `ModelsConfig`
-- Secrets resolved from env vars using existing `UPPER_CASE` convention
-- `sandbox` section is optional — if absent, no sandbox tools are available to the LLM
-- The loader returns a unified `AppConfig = { models: ModelsConfig, sandbox?: SandboxConfig }`
+**Config types** (`app-config.ts`):
+- `AppConfig.sandbox: Option<SandboxConfig>` — `None` when `[sandbox]` section absent
+- `SandboxConfig.enabled: boolean` — explicit toggle, defaults to `true`
+- `SandboxDependencyConfig` — per-package: `package`, `docs`, `secretEnv`, `secretValue` (resolved from env), `hosts`
+- Secrets resolved from env vars at config load time via `Config.redacted()`
+
+**Disabled paths:**
+- No `[sandbox]` section → `Option.none()` → no sandbox service, no tools, no doc indexing
+- `enabled = false` → section parsed but treated as disabled — same effect
 
 ---
 
 ## 2. Sandbox Provider Abstraction
 
-A provider-agnostic interface so we can swap Deno for E2B, Modal, or a local Docker container later.
+Provider-agnostic interface (`sandbox/types.ts`). Currently only Deno is implemented.
 
 ```
-SandboxProvider (Effect.Service)
+SandboxProvider
 ├── createSnapshot(deps) → Effect<SnapshotRef, SandboxError>
+├── snapshotExists(slug) → Effect<boolean, SandboxError>
 ├── createSandbox(options) → Effect<SandboxHandle, SandboxError, Scope>
-│   ├── options: { snapshot, volume?, secrets }
-│   ├── SandboxHandle.eval(code: string) → Effect<SandboxResult, SandboxExecError>
-│   └── Cleanup handled by Effect.acquireRelease via Scope
-├── createVolume(sessionId) → Effect<VolumeRef, SandboxError>
+│   ├── options: { snapshot, volume?, secrets, region }
+│   ├── SandboxHandle.eval(code) → Effect<SandboxResult, SandboxExecError>
+│   └── Cleanup via Effect.acquireRelease (Scope)
+├── createVolume(slug, region) → Effect<void, SandboxError>
+├── volumeExists(slug) → Effect<boolean, SandboxError>
 ├── deleteVolume(slug) → Effect<void, SandboxError>
-└── Provider implementations:
-    ├── DenoSandboxProvider (wraps @deno/sandbox — existing experiment code)
+└── Implementations:
+    ├── DenoSandboxProvider (sandbox/providers/deno.ts)
     └── (future) E2BSandboxProvider, etc.
 ```
 
-**Key design points:**
-- `SandboxHandle` is the only type the rest of the system touches — never the underlying provider
-- `eval` returns structured results: `{ success: true, result: unknown, stdout: string }` or `{ success: false, error: string, stdout: string }`
-- Secrets are injected at sandbox creation time as env vars with host-scoped network access
-- Dependencies are pre-installed in the snapshot — no `deno install` at session time
-- Resource lifecycle uses `Effect.acquireRelease` — sandbox creation is the acquire, `sandbox.close()` is the release. The enclosing `Scope` (from the `SessionProcessor`) guarantees cleanup even on crash/interrupt.
-
-**Provider selection** is driven by `sandbox.provider` in config.toml. A simple factory picks the right implementation at startup.
+**Key points:**
+- `SandboxHandle` is the only type the rest of the system touches
+- `eval` returns structured `SandboxResult`: `{ success, result?, error?, stdout }`
+- Secrets injected at sandbox creation as env vars with host-scoped network access
+- Resource lifecycle via `Effect.acquireRelease` — `Scope.close()` cleans up sandbox
 
 ---
 
 ## 3. Snapshot Strategy
 
-Snapshots eliminate dependency installation time from session sandbox creation. A base snapshot is built once at app startup and reused by all sessions.
+Snapshots eliminate dependency installation time. Built **once at startup** regardless of mode.
 
-### Startup flow
+**Startup flow** (`SandboxService`):
+1. Hash sandbox config: `sha256(sorted dep names)` → `configHash`
+2. Check if snapshot `genui-deps-{configHash}` exists (Deno API)
+3. If exists → reuse, done
+4. If not → create temp sandbox, install deps, snapshot filesystem, destroy temp
+5. Store `snapshotRef` in manager for session sandbox creation
 
-```
-App startup:
-  1. Hash sandbox config: sha256(sorted deps + versions) → configHash
-  2. Check if snapshot "genui-deps-{configHash}" exists (Deno API)
-  3. If exists → use it, done
-  4. If not:
-     a. Create temporary sandbox
-     b. Write package.json with all configured dependencies
-     c. Run `deno install`
-     d. Create volume from sandbox filesystem
-     e. Snapshot the volume → "genui-deps-{configHash}"
-     f. Destroy temporary sandbox + temporary volume
-  5. Store snapshotSlug in AppConfig for session sandbox creation
-```
+The snapshot is **always** built at startup when sandbox is enabled. The `mode` setting only controls when _session sandboxes_ are created (lazy vs warm), not when the snapshot is built.
 
-### Why this works
-
-- Snapshot creation is a one-time cost (~10-30s depending on deps)
-- Subsequent app startups skip creation if config hasn't changed (hash matches)
-- Session sandbox creation becomes `Sandbox.create({ root: snapshotSlug })` → boots in <1s
-- When config.toml dependencies change → new hash → new snapshot on next startup
-- Old snapshots can be cleaned up manually or via a retention policy
-
-### Session sandbox creation (with snapshot)
-
-```
-SandboxManager.getOrCreate(sessionId):
-  1. Sandbox.create({ root: snapshotSlug, volumes: { "/workspace": volumeSlug } })
-  2. Ready — deps pre-installed, volume mounted, <1s
-```
-
-No `deno install` needed. The snapshot already contains `node_modules` and the Deno cache.
+**Why:** Snapshot creation is a one-time cost (~10-30s). Subsequent startups skip it if config hash matches. Session sandbox boots from snapshot in <1s.
 
 ---
 
 ## 4. Volume & Code Module Persistence
 
-### Volume Registry
-
-Tracks which session owns which volume. Stored in Turso.
+### Volume Registry (Turso)
 
 ```
 session_volumes
-├── session_id: text (FK to sessions)
+├── session_id: text (FK)
 ├── volume_slug: text (unique)
 ├── region: text
 ├── created_at: integer
 └── last_accessed_at: integer
 ```
 
-**Lifecycle:**
-- Volume created on first `run_code` call (alongside sandbox creation)
-- `last_accessed_at` bumped every time sandbox mounts the volume
-- Background job deletes volumes where `last_accessed_at < now - volume_ttl`
-- On volume deletion: also delete associated `code_modules` entries (they reference files that no longer exist)
+- Created on first `run_code` call (lazy)
+- `last_accessed_at` bumped on each sandbox mount
+- Background job deletes expired volumes (TTL-based)
 
-### Code Module Index
-
-The AI saves descriptions of reusable code it writes to the sandbox. Stored in Turso with embeddings for vector search.
+### Code Module Index (Turso)
 
 ```
 code_modules
 ├── id: text (primary key)
 ├── session_id: text (FK)
-├── volume_slug: text (FK to session_volumes)
-├── path: text                    ("lib/linear.ts")
-├── description: text             ("Linear API: getAllMyIssues(page) returns ...")
-├── exports: text                 (JSON array: ["getAllMyIssues", "getIssueById"])
-├── usage: text                   ("import { getAllMyIssues } from './lib/linear.ts'; ...")
-├── embedding: F32_BLOB(N)       (vector of description for search)
+├── volume_slug: text (FK)
+├── path: text
+├── description: text
+├── exports: text (JSON array)
+├── usage: text
+├── embedding: F32_BLOB(N)
 └── created_at: integer
 ```
 
-No source code stored — the volume is the source of truth for actual file contents.
+No source code stored — the volume is the source of truth.
 
-### Search with volume-aware code module inclusion
+### Volume-aware search
 
-The `search_docs` tool always searches SDK documentation. Whether it also returns saved code modules depends on whether the session's volume still exists.
+`search_docs` always searches SDK documentation. Code modules are only returned when the session's volume still exists:
 
-```
-search_docs(query, sessionId):
-  1. Always: vector search on doc_chunks → SDK documentation results
-  2. Look up session_volumes in Turso → volume_slug (or null)
-  3. If slug exists → Volume.get(slug) via Deno API
-     ├── Volume found → also search code_modules for this session
-     │   Merge SDK docs + code modules, return combined top-k
-     └── Volume null/404 → volume gone, skip code_modules
-        ├── Delete session_volumes entry (eager cleanup)
-        └── Delete associated code_modules entries
-  4. If no slug in registry → SDK docs only (session never had a volume)
-```
-
-This way:
-- SDK documentation is **always** available — the search never fails
-- Code modules are only returned when the volume backing them exists
-- No stale results, no wasted tool calls — the AI never sees modules it can't import
-- Cleanup is eager: a single `Volume.get()` call cleans up the Turso registry on miss
-
-**Edge case:** Volume deleted between search and `run_code` (seconds apart, very unlikely). `run_code` fails with a clear error, AI adapts by searching docs and rewriting.
+1. Always: vector search `doc_chunks` → SDK docs
+2. Look up `session_volumes` → `volume_slug`
+3. If volume alive → also search `code_modules`, merge results
+4. If volume gone → skip, eagerly clean up stale registry entries
 
 ---
 
 ## 5. Documentation System
 
-A documentation index for SDK docs that the LLM can search via a tool. Uses vector embeddings stored in Turso for semantic search, matching the existing pattern from `MemoryService`.
+### Indexing (startup)
 
-### 5a. Fetch & Index (startup time)
+`DocSearchService` fetches and indexes SDK docs at startup:
+1. For each dependency with `docs[]` URLs, fetch markdown
+2. Chunk by `## ` headers via `ChunkingService`
+3. Embed each chunk, store in Turso `doc_chunks` table
+4. Skip unchanged chunks (content hash check)
 
-When the app starts (or when sandbox config is loaded):
+### Search (tool call time)
 
-1. For each dependency, fetch all URLs listed in `docs[]`
-2. Parse markdown into sections (split on `## ` headers)
-3. Each section becomes a `DocChunk { id, package, heading, content, url, embedding }`
-4. Generate embeddings for each chunk (reuse existing embedding model from `MemoryService`)
-5. Store chunks + embeddings in Turso (`doc_chunks` table with vector column)
-6. On subsequent startups, skip chunks whose source URL + content hash haven't changed
+Vector similarity search using Turso `vector_distance_cos`:
+1. Embed query
+2. Search `doc_chunks` with optional package filter
+3. If session volume alive, also search `code_modules`
+4. Merge, return top-k
 
-This runs once at startup, not per session. Docs are shared across all sessions.
-
-**Storage schema (Turso):**
-
-```
-doc_chunks
-├── id: text (primary key, e.g. hash of package+heading)
-├── package: text
-├── heading: text
-├── content: text
-├── url: text
-├── content_hash: text          (detect changes on restart)
-├── embedding: F32_BLOB(N)     (vector column for ANN search)
-└── created_at: integer
-```
-
-### 5b. Search (tool call time)
-
-Vector similarity search using the same Turso `vector_distance_cos` / `vector_top_k` pattern already used for memory search:
-
-1. Embed the query string
-2. Always: search `doc_chunks` via `vector_top_k` with optional `package` filter
-3. Check session volume: look up `session_volumes` → `Volume.get(slug)` via Deno API
-4. If volume alive: also search `code_modules` via `vector_top_k` with `session_id` filter
-5. If volume gone: skip `code_modules`, eagerly clean up stale registry + index entries
-6. Merge results, return top-k (k = 3-5)
-
-The `Volume.get()` call is lightweight and doubles as a liveness check — it keeps the search results honest without a separate background reconciliation job. SDK documentation is always returned regardless of volume state.
-
-This reuses the existing embedding infrastructure — same model, same DB, same query pattern.
-
-**Future enhancements (inform design, don't build yet):**
-- **BM25 keyword search** — add a second retrieval path using Turso's FTS5 full-text index. Run both vector + BM25 in parallel, merge results.
-- **Reranking** — after retrieving candidates from vector + BM25, run a cross-encoder reranker to produce final top-k. The `search()` return type stays `DocChunk[]` regardless of retrieval strategy.
-
-### 5c. Documentation Sourcing — Current & Future
-
-**v1 (now): Configured markdown URLs**
-- Simplest approach — works for SDKs that publish LLM-friendly docs (Linear, Stripe, etc.)
-- Markdown fetched at startup, chunked by headers, embedded, stored
-
-**Future sourcing strategies** (design the `DocSource` type to be extensible):
-
-| Strategy | When to use | How it works |
-|----------|-------------|--------------|
-| **Markdown URL** | SDK publishes clean markdown docs | Fetch URL, chunk by headers |
-| **Sitemap crawl** | Docs site has a sitemap but no single markdown file | Crawl sitemap, extract content from HTML pages (readability/turndown), chunk |
-| **NPM README + types** | No docs site at all | Fetch README from npm registry, extract TypeScript type declarations from package `.d.ts` files, chunk by export |
-| **GitHub repo scrape** | Docs live in a repo's `/docs` folder | Fetch tree via GitHub API, process each markdown file |
-| **LLM-generated summaries** | Docs are verbose/scattered | Run a summarization pass over raw docs to produce concise API reference chunks |
-| **llms.txt / llms-full.txt** | Site publishes LLM-optimized docs per the llms.txt standard | Fetch from `/.well-known/llms.txt` or `/llms-full.txt`, already chunked for LLM consumption |
-
-For now, the `DocSearchService` just takes a list of URLs. The chunking + embedding pipeline is the same regardless of how the markdown was obtained — so swapping sourcing strategies later doesn't affect the search layer.
-
-### 5d. Service shape
+### Service shape (`DocSearchService`)
 
 ```
-DocSearchService (Effect.Service)
-├── Depends on: AppConfig (sandbox deps + doc URLs), EmbeddingModel, Database
-├── Startup: fetches docs, chunks, embeds, upserts into Turso
-├── search(query: string, options?: { package?: string, sessionId?: string, limit?: number })
-│   → Effect<SearchResult[]>    (merged doc_chunks + code_modules results)
-└── listPackages() → string[]   (so LLM knows what's available)
+DocSearchService
+├── search(query, options?) → Effect<SearchResult[]>
+├── listPackages() → string[]     (empty when sandbox disabled)
+├── upsertCodeModule(module) → Effect<void>
+└── Depends on: AppConfig, EmbeddingModel, StoreService, ChunkingService
 ```
 
 ---
 
 ## 6. LLM Tools
 
-Two tools added to the `streamText` call in `GenerateService`:
+Two tools, defined in `generate/tools.ts` via `ToolService`. Only injected into `streamText` when sandbox is enabled and packages are configured.
 
-### Tool 1: `search_docs`
+### `search_docs`
 
 ```
 search_docs({ query: string, package?: string })
-→ { results: [{ type: "doc"|"module", heading|path, content|usage, url? }] }
+→ SearchResult[]
 ```
 
-LLM uses this BEFORE writing code to understand the SDK API. Returns both SDK documentation and any saved code modules from the session. The system prompt instructs it to always search first.
+Searches SDK docs + saved code modules. LLM calls this **before** writing code.
 
-### Tool 2: `run_code`
+### `run_code`
 
 ```
 run_code({ code: string, description: string })
 → { success: boolean, result?: unknown, error?: string, stdout?: string }
 ```
 
-Executes TypeScript in the session's sandbox. Returns structured output so the LLM can interpret results and update the UI accordingly.
+Executes TypeScript in the session's sandbox. Creates volume + sandbox on first call (lazy mode).
 
-### System prompt addition
+### Tool lifecycle
 
-Added to the existing `STREAMING_PATCH_PROMPT`:
+- `ToolService` captures `DocSearchService`, `StoreService`, `SandboxService` at construction
+- `makeTools(ctx)` creates per-request tools with a session-scoped `sandboxRef: Ref<Option<ManagedSandbox>>`
+- Tool `execute` callbacks run Effect programs via `Runtime.runPromise`
+- `stopWhen: stepCountIs(10)` limits tool call loops
 
+### Conditional injection
+
+In `GenerateService.streamUnified`:
 ```
-## Code Sandbox
-
-You have access to a secure sandbox where you can run TypeScript code against real APIs.
-
-Available SDKs: {list from config}
-
-### Workflow
-1. Use `search_docs` to look up how to use an SDK — also returns saved modules from earlier
-2. Write code using `run_code` to call the API
-3. Use the results to generate/update the UI with patches
-4. When you write reusable functions, save them as modules (see below)
-
-### Saving Reusable Code
-When you write a function that could be useful in future requests, save it as a file in
-the sandbox and emit a code_modules summary at the END of your response:
-{"type":"code_modules","modules":[{"path":"lib/linear.ts","description":"...","exports":["fn1"],"usage":"import { fn1 } from './lib/linear.ts'; ..."}]}
-
-Write modules as focused, importable files:
-- One module per SDK/domain (lib/linear.ts, lib/slack.ts)
-- Export pure functions with clear parameters
-- Keep functions reusable — accept parameters instead of hardcoding values
-
-### Rules
-- ALWAYS search docs before writing code — do not assume API shapes
-- Code runs in Deno with npm package support
-- Secrets are pre-injected as env vars (access via `Deno.env.get("SECRET_NAME")`)
-- Return data as the last expression (it becomes the tool result)
-- Keep code focused — one API call per run_code invocation
-- If a module import fails, the module may have expired — search docs and rewrite it
+packages = toolService.listPackages()
+tools = packages.length > 0
+  ? toolService.makeTools({ sessionId, sandboxRef, runtime })
+  : undefined
 ```
 
-### AI SDK integration
-
-The AI SDK's `streamText` supports tools + multi-step natively via `maxSteps`. The flow:
-
-1. LLM generates text (JSONL patches) or decides to call a tool
-2. If tool call → AI SDK pauses text generation, we execute the tool, return result
-3. LLM continues generating with tool result in context
-4. Repeat until LLM finishes (or `maxSteps` reached)
-
-The existing stream pipeline (accumulate lines → parse JSONL → validate patches) only processes text output. Tool call/result events pass through the AI SDK internally between steps. We filter the `fullStream` to only emit text-deltas as before.
+When `undefined`, `streamText` runs without tools — zero overhead for non-sandbox sessions.
 
 ---
 
-## 7. Stream Finalizer — Code Module Storage
+## 7. Prompt Integration
 
-Similar to how the memory system saves summaries after generation, the code module index is populated from the LLM's own output at the end of the stream.
+The sandbox prompt is **compact** — just a short addendum to the system prompt listing available packages and tool usage rules. No module listings, no API docs in the prompt. The LLM uses `search_docs` for detailed API information.
 
-### How it works
-
-1. LLM writes reusable code via `run_code` (files saved to sandbox FS → volume)
-2. At the end of the response, LLM emits a `code_modules` JSONL line summarizing what it saved
-3. The stream pipeline picks up `{"type":"code_modules",...}` alongside patches/full/stats
-4. The finalizer (in `UIService`, similar to memory saving):
-   - Embeds each module's `description` field
-   - Upserts into `code_modules` table in Turso (keyed by session_id + path)
-   - Associates with the session's volume slug
-
-### Why the AI writes the summary
-
-- The AI knows exactly what it wrote and why — it produces the best description
-- Descriptions are optimized for future LLM consumption (the AI writes for itself)
-- No extra LLM call needed for summarization (unlike memory, which requires a separate call)
-- The `usage` field gives the next LLM request a ready-to-use import snippet
-
-### Response type addition
+### System prompt (`prompts.ts`)
 
 ```
-UnifiedResponse =
-  | { type: "patches", patches: Patch[] }
-  | { type: "full", html: string }
-  | { type: "stats", ... }
-  | { type: "code_modules", modules: CodeModuleSummary[] }    ← NEW
+buildSystemPrompt(packages?) =
+  STREAMING_PATCH_PROMPT + (packages ? buildSandboxPrompt(packages) : "")
 ```
 
-The `code_modules` response type flows through `parseJsonLine` like patches and full HTML. It's not a patch or UI update — it's metadata that gets stored, not applied to the VDOM.
+`buildSandboxPrompt` adds ~5 lines:
+- Lists available packages
+- Instructs: call `search_docs` before writing code
+- Instructs: call `run_code` to execute code
+- Instructs: emit `code_modules` JSONL for reusable modules
+
+When sandbox is disabled, the system prompt contains zero sandbox information.
+
+### Message structure
+
+```
+[SYSTEM] Static prompt (+ sandbox addendum if enabled)  ← always cached
+[USER]
+  HTML:\n{currentHtml}                                    ← changes per action
+  [RECENT CHANGES] ...                                    ← changes sometimes
+  [RELEVANT PAST CONTEXT] ...                             ← changes sometimes
+  [NOW] 1. Action: increment Data: {}                     ← changes every request
+```
+
+Design principle: keep the prompt lean. Speed matters — minimize prompt size and tool roundtrips.
+
+---
+
+## 8. Stream Finalizer — Code Module Storage
+
+When the LLM saves reusable code to the sandbox, it emits a `code_modules` JSONL line at the end of its response:
+
+```json
+{"type":"code_modules","modules":[{"path":"lib/linear.ts","description":"...","exports":["fn1"],"usage":"import { fn1 } from './lib/linear.ts'"}]}
+```
+
+### Response types (`generate/types.ts`)
+
+```
+LLMResponseSchema = patches | full | code_modules
+UnifiedResponse = patches | full | stats | code_modules
+```
 
 ### Processing in UIService
 
-```
-handleResponse(response):
-  match response.type:
-    "patches"      → apply to VDOM, emit SSE patch events
-    "full"         → replace VDOM, emit SSE html event
-    "stats"        → emit SSE stats event
-    "code_modules" → embed descriptions, upsert to Turso (async, non-blocking)
-```
-
----
-
-## 8. Token-Efficient Prompt Integration
-
-Code module metadata must be available to the LLM without bloating the prompt. The key constraint: preserve prompt caching (prefix-based) by ordering content from most-stable to least-stable.
-
-### Current message structure
-
-```
-[SYSTEM] Static prompt (STREAMING_PATCH_PROMPT)     ← always cached
-[USER]
-  HTML:\n{currentHtml}                               ← changes per action
-  [RECENT CHANGES] ...                               ← changes sometimes
-  [RELEVANT PAST CONTEXT] ...                        ← changes sometimes
-  [NOW] 1. Action: increment Data: {}                ← changes every request
-```
-
-### New message structure (with sandbox)
-
-```
-[SYSTEM] Static prompt + sandbox rules               ← always cached (longest prefix)
-
-[USER]
-  [SANDBOX MODULES]                                   ← changes rarely
-  - lib/linear.ts: getAllMyIssues(page), getIssueById(id)
-    usage: import { getAllMyIssues } from './lib/linear.ts'
-  - lib/slack.ts: sendMessage(channel, text)
-    usage: import { sendMessage } from './lib/slack.ts'
-
-  HTML:\n{currentHtml}                                ← changes per action
-
-  [RECENT CHANGES]                                    ← changes sometimes
-  1. "show my issues" → fetched 12 Linear issues, rendered as table
-
-  [RELEVANT PAST CONTEXT]                             ← changes sometimes
-  - "add slack integration" → added sendMessage module
-
-  [NOW]                                               ← changes every request
-  1. Action: refresh Data: {}
-```
-
-### Why this order
-
-Prompt caching is prefix-based — the provider caches the longest matching prefix from the previous request.
-
-| Section | Stability | Cache behavior |
-|---------|-----------|----------------|
-| System prompt | Static | Always cached |
-| `[SANDBOX MODULES]` | Changes only when AI saves new modules (rare) | Cached across most requests within a session |
-| `HTML` | Changes on every action (patch/full) | Cache breaks here on most requests |
-| `[RECENT CHANGES]` | Changes after each generation | Not cached |
-| `[NOW]` | Changes every request | Never cached |
-
-By placing `[SANDBOX MODULES]` **before** HTML, the cached prefix extends through the module list on requests where modules haven't changed (which is most requests — modules are only saved occasionally). This is strictly better than the current layout where the cache breaks immediately at the HTML boundary.
-
-### Module section is compact
-
-The module section only contains:
-- File path (short)
-- Function names (short)
-- One-line usage snippet (short)
-
-NOT the full source code. A session with 5 saved modules adds ~10 lines (~200 tokens) to the prompt. This is the minimum needed for the AI to know what's available and how to import it.
-
-If the AI needs more detail about a module, it calls `search_docs` — the full description is in the `code_modules` table and returned via vector search. This keeps the prompt lean while preserving discoverability.
+`UIService.handleResponse` matches on response type:
+- `patches` → apply to VDOM, emit SSE patch events
+- `full` → replace VDOM, emit SSE html event
+- `stats` → emit SSE stats event
+- `code_modules` → look up session volume, upsert modules via `DocSearchService.upsertCodeModule` (async, non-blocking — failures don't break the stream)
 
 ---
 
 ## 9. Sandbox Lifecycle
 
-Two modes for sandbox creation, configurable via `sandbox.mode` in `config.toml`. Both use snapshots for instant boot and volumes for persistence.
-
 ### Mode: `lazy` (default)
 
-Sandbox is created on first `run_code` call. Zero cost if LLM never uses sandbox tools.
+Sandbox created on first `run_code` call. Zero cost if LLM never uses sandbox tools. Snapshot is still built at startup.
 
 ```
+App startup → ensureSnapshot (always)
 Session created → sandboxRef = Ref(None)
-        │
-LLM calls run_code
-        │
-  sandboxRef == None?
-  ├── yes → Look up volume in session_volumes registry
-  │         Volume exists? → mount it
-  │         Volume gone?   → create new volume, register in Turso
-  │         Sandbox.create({ root: snapshotSlug, volumes: { "/workspace": slug } })
-  │         Effect.acquireRelease within processor Scope
-  │         Ref.set(sandboxRef, Some(handle))
-  └── no  → reuse existing handle
-        │
-        ▼
-  Sandbox active ←──── subsequent run_code calls reuse it
-        │
-  Processor released (dormancy)
-        │
-  Scope.close() → acquireRelease finalizer → sandbox.close()
-  Volume survives. Volume TTL timer continues.
+LLM calls run_code → getOrCreateSandbox → Sandbox.create(root: snapshot)
+Processor dormancy → Scope.close() → sandbox.close()
+Volume survives → TTL cleanup later
 ```
 
 ### Mode: `warm`
 
-Sandbox is created immediately when the `SessionProcessor` is created. Eliminates boot lag on first `run_code`.
+Same as lazy but sandbox created immediately per session.
+
+### Resource management
 
 ```
-Session processor created (getOrCreate)
-        │
-  sandbox.mode == "warm"?
-  ├── yes → same creation flow as lazy, but immediately
-  └── no  → Ref.set(sandboxRef, None)   (lazy mode)
+SandboxManager owns:
+├── snapshotRef: Ref<Option<SnapshotRef>>  (resolved once)
+├── getOrCreateSandbox(sessionId, sandboxRef, volumeSlug)
+│   └── Creates Scope per sandbox, stores in sandboxRef
+├── releaseSandbox(sandboxRef)
+│   └── Scope.close() → acquireRelease finalizer
+└── Volume CRUD (createVolume, volumeExists, deleteVolume)
 ```
-
-### Resource management with Effect
-
-```
-SessionProcessor.scope
-├── actionQueue (existing)
-├── eventPubSub (existing)
-├── fiber (existing)
-└── sandboxHandle (NEW, via acquireRelease)
-    ├── acquire: Sandbox.create({ root: snapshot, volumes: ... })
-    └── release: sandbox.close()   (volume NOT deleted — it outlives sandbox)
-```
-
-When the dormancy checker calls `processor.release()` → `Scope.close()`, the sandbox is closed but the volume persists. The volume cleanup job handles volume TTL independently.
 
 ### Volume TTL cleanup
 
 Background job (runs every N minutes):
 1. Query `session_volumes WHERE last_accessed_at < now - volume_ttl_minutes`
 2. Delete volume via Deno API
-3. Delete from `session_volumes` table
-4. Delete associated `code_modules` entries (stale — files no longer exist)
-
-### Scale to zero
-
-- **Lazy mode:** If the LLM never calls `run_code`, no sandbox/volume created. Zero cost.
-- **Warm mode:** Sandbox exists for processor lifetime. Volume persists for TTL after.
-- **Volume TTL:** After configured inactivity, volume deleted. ~$0.20/month per volume while active.
-- **Snapshot:** Shared across all sessions, one-time creation cost. Persists until config changes.
-
-### Where it lives
-
-```
-SessionProcessor (extended)
-├── actionQueue: Queue<Action>
-├── eventPubSub: PubSub<StreamEventWithOffset>
-├── sandboxRef: Ref<Option<SandboxHandle>>    ← NEW
-├── volumeSlug: Ref<Option<string>>           ← NEW (persists across sandbox recreations)
-├── lastActivity: Ref<number>
-├── fiber: RuntimeFiber
-└── scope: CloseableScope
-```
+3. Delete `session_volumes` + associated `code_modules` entries
 
 ---
 
@@ -716,75 +474,47 @@ SessionProcessor (extended)
 ```
 apps/backend/src/
 ├── services/
-│   ├── app-config.ts              ← renamed from model-config.ts, adds SandboxConfig
-│   ├── model-registry.ts          ← unchanged (reads from AppConfig.models)
+│   ├── app-config.ts              ← AppConfig with Option<SandboxConfig>
+│   ├── model-registry.ts          ← reads from AppConfig.models
 │   ├── sandbox/
 │   │   ├── index.ts               ← re-exports
-│   │   ├── types.ts               ← SandboxHandle, SandboxConfig, SandboxError, VolumeRef
-│   │   ├── manager.ts             ← SandboxManager (snapshot, lazy/warm, volume registry)
-│   │   ├── code-index.ts          ← CodeModuleIndex (embed, upsert, search code_modules)
-│   │   ├── schema.ts              ← Drizzle schema: session_volumes, code_modules tables
+│   │   ├── types.ts               ← SandboxHandle, SandboxProvider, SandboxError
+│   │   ├── manager.ts             ← SandboxManager (snapshot, sandbox, volume lifecycle)
+│   │   ├── service.ts             ← SandboxService (Effect.Service, wraps manager)
+│   │   ├── schema.ts              ← Drizzle schema: session_volumes, code_modules
 │   │   └── providers/
-│   │       ├── deno.ts            ← DenoSandboxProvider (from experiment)
-│   │       └── (future) e2b.ts
+│   │       └── deno.ts            ← DenoSandboxProvider
 │   ├── doc-search/
 │   │   ├── index.ts               ← re-exports
-│   │   ├── service.ts             ← DocSearchService (embed, store, vector search)
-│   │   ├── chunker.ts             ← markdown → sections splitter
-│   │   └── schema.ts              ← Drizzle schema for doc_chunks table
+│   │   ├── service.ts             ← DocSearchService (index, search, upsertCodeModule)
+│   │   ├── chunking.ts            ← markdown → sections splitter
+│   │   └── schema.ts              ← Drizzle schema for doc_chunks
 │   ├── generate/
-│   │   ├── service.ts             ← adds tools to streamText
-│   │   ├── tools.ts               ← NEW: tool definitions (search_docs, run_code)
-│   │   └── prompts.ts             ← extended with sandbox instructions
+│   │   ├── service.ts             ← GenerateService (streamUnified, retry, tools)
+│   │   ├── tools.ts               ← ToolService (search_docs, run_code)
+│   │   ├── prompts.ts             ← STREAMING_PATCH_PROMPT + buildSandboxPrompt
+│   │   └── types.ts               ← LLMResponseSchema, CodeModuleSummarySchema
+│   └── ui.ts                      ← UIService (handles code_modules finalizer)
+```
+
+### Layer composition (`index.ts`)
+
+```
+SandboxService.Default → ToolService.Default → GenerateService.Default → UIService.Default
+DocSearchService.Default ─┘                                              ─┘
+StoreService.Default ─────┘                                              ─┘
 ```
 
 ---
 
-## 11. Implementation Order
+## 11. Future Considerations
 
-1. **Config** — extend config.toml schema + loader to include sandbox section (with mode, region, volume_ttl)
-2. **Snapshot** — build base snapshot at startup from configured dependencies. Hash-based cache invalidation.
-3. **Doc search** — DocSearchService (fetch URLs, chunk, embed, store in Turso, vector search). Can be tested standalone.
-4. **Sandbox provider** — Port Deno experiment into provider abstraction with `Effect.acquireRelease`, snapshots, volumes.
-5. **Volume registry** — `session_volumes` table + background cleanup job.
-6. **Code module index** — `code_modules` table, embed + upsert, vector search merged with doc search.
-7. **Tools** — Define `search_docs` and `run_code` tools. Wire into GenerateService.
-8. **Finalizer** — Parse `code_modules` JSONL from stream, store via CodeModuleIndex.
-9. **Prompt structure** — Add `[SANDBOX MODULES]` section before HTML in user message.
-10. **System prompt** — Add sandbox instructions + module saving instructions. Test end-to-end.
-11. **APPROACH.md** — Document as Step 26.
+**Auth layer:** Per-user OAuth tokens instead of shared env var secrets. Design: secrets resolution as `(name) => Effect<Redacted>`.
 
----
+**Other runtimes:** Provider abstraction supports adding Python/Go. `eval` interface stays the same.
 
-## 12. Future Considerations (inform design, don't build yet)
+**Hybrid retrieval:** BM25 keyword search + vector + cross-encoder reranking. `search()` return type unchanged.
 
-**Auth layer (better-auth):**
-- Currently: secrets from env vars, shared across all users
-- Future: per-user OAuth tokens fetched at sandbox creation time
-- Design for this: secrets resolution is a function `(secretName: string) => Effect<Redacted<string>>`, not a static map. For now that function reads env vars; later it calls the auth service.
+**Tool result streaming:** `eval` could return a Stream for long-running sandbox output.
 
-**Other runtimes:**
-- Provider abstraction means adding Python/Go/etc. is just a new provider implementation
-- `eval` interface stays the same (code in, result out)
-- Dependencies and doc URLs are already per-entry in config
-
-**Snapshot versioning:**
-- Currently: one snapshot per config hash
-- Future: keep N recent snapshots for rollback
-- Snapshot naming: `genui-deps-{configHash}-{timestamp}`
-
-**Hybrid retrieval (BM25 + vector + reranking):**
-- Currently: vector similarity only
-- Next: add FTS5 full-text index on `doc_chunks` + `code_modules` for BM25 keyword search
-- Then: run vector + BM25 in parallel, merge candidates, apply cross-encoder reranker for final top-k
-- `search()` return type stays the same — retrieval strategy is an internal concern
-
-**Tool result streaming:**
-- Currently: tool results are returned as a single blob
-- Future: stream long-running sandbox output (e.g., progress updates)
-- Design for this: `eval` could return a Stream instead of a single Effect (later)
-
-**Cross-session module sharing:**
-- Currently: code_modules scoped to session
-- Future: "published" modules visible across sessions (user-level library)
-- Design for this: add `scope: "session" | "user"` to code_modules, search with appropriate filter
+**Cross-session module sharing:** `scope: "session" | "user"` on code_modules for user-level libraries.

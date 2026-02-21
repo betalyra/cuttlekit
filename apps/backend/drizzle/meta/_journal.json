@@ -22,6 +22,20 @@
       "when": 1771161427358,
       "tag": "0002_daffy_white_queen",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1771579562984,
+      "tag": "0003_oval_wendell_rand",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1771581600000,
+      "tag": "0004_sandbox_vector_indexes",
+      "breakpoints": true
     }
   ]
 }

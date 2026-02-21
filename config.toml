@@ -1,5 +1,7 @@
 default_model = "moonshotai/kimi-k2-instruct-0905"
 
+# --- Model providers ---
+
 [providers.groq]
 
 [providers.groq.options]
@@ -21,3 +23,21 @@ thinkingConfig = { thinkingLevel = "minimal" }
 [[providers.google.models]]
 id = "gemini-3-flash-preview"
 label = "Gemini 3 Flash"
+
+# --- Sandbox ---
+
+[sandbox]
+enabled = true
+provider = "deno"
+mode = "warm"
+region = "ams"
+volume_ttl_minutes = 30
+volume_capacity_mb = 500
+timeout_seconds = 300
+memory_mb = 1280
+
+[[sandbox.dependencies]]
+package = "@linear/sdk"
+docs = ["https://linear.app/developers/sdk.md"]
+secret_env = "LINEAR_API_KEY"
+hosts = ["api.linear.app"]

@@ -1,15 +1,19 @@
-import { Effect, Stream, Match, Ref, pipe } from "effect";
-import { GenerateService, type UnifiedResponse } from "./generate/index.js";
+import { Effect, Stream, Match, Ref, Option, pipe } from "effect";
+import { GenerateService, type UnifiedResponse, type CodeModuleSummary } from "./generate/index.js";
 import { MemoryService, type MemoryChange } from "./memory/index.js";
+import { StoreService } from "./memory/store.js";
+import { DocSearchService } from "./doc-search/index.js";
 import { SessionService } from "./session.js";
 import { VdomService, type Patch } from "./vdom/index.js";
 import type { Action } from "./durable/types.js";
 import type { UserAction } from "../types/messages.js";
+import type { ManagedSandbox } from "./sandbox/manager.js";
 
 export type UIRequest = {
   sessionId?: string;
   actions: readonly Action[];
   modelId?: string;
+  sandboxRef?: Ref.Ref<Option.Option<ManagedSandbox>>;
 };
 
 export class UIService extends Effect.Service<UIService>()("UIService", {
@@ -19,6 +23,8 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
     const memoryService = yield* MemoryService;
     const sessionService = yield* SessionService;
     const vdomService = yield* VdomService;
+    const store = yield* StoreService;
+    const docSearch = yield* DocSearchService;
 
     const resolveSession = (request: UIRequest) =>
       Effect.gen(function* () {
@@ -83,6 +89,7 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
           currentHtml: isResetAction ? undefined : (currentHtml ?? undefined),
           actions: request.actions,
           modelId: request.modelId,
+          sandboxRef: request.sandboxRef,
         });
 
         // Start with session event
@@ -136,6 +143,45 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
             return [{ type: "html" as const, html } as StreamEvent];
           });
 
+        const handleCodeModules = (
+          modules: CodeModuleSummary[],
+        ): Effect.Effect<StreamEvent[]> =>
+          Effect.gen(function* () {
+            const volumeEntry = yield* store.getSessionVolume(sessionId);
+            if (!volumeEntry) return [];
+
+            yield* pipe(
+              modules,
+              Effect.forEach(
+                (m) =>
+                  docSearch.upsertCodeModule({
+                    sessionId,
+                    volumeSlug: volumeEntry.volumeSlug,
+                    path: m.path,
+                    description: m.description,
+                    exports: m.exports,
+                    usage: m.usage,
+                  }),
+                { concurrency: 3 },
+              ),
+            );
+
+            yield* Effect.log("Code modules indexed", {
+              count: modules.length,
+            });
+
+            return [];
+          }).pipe(
+            Effect.catchAll((error) =>
+              Effect.gen(function* () {
+                yield* Effect.logWarning("Failed to index code modules", {
+                  error: String(error),
+                });
+                return [] as StreamEvent[];
+              }),
+            ),
+          );
+
         const handleResponse = (response: UnifiedResponse) =>
           pipe(
             Match.value(response),
@@ -143,6 +189,9 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
               handlePatchResponse(r.patches),
             ),
             Match.when({ type: "full" }, (r) => handleFullResponse(r.html)),
+            Match.when({ type: "code_modules" }, (r) =>
+              handleCodeModules(r.modules),
+            ),
             Match.when({ type: "stats" }, (r) =>
               Effect.succeed([
                 {
