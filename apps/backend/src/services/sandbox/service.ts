@@ -36,7 +36,8 @@ export class SandboxService extends Effect.Service<SandboxService>()(
 
       yield* Effect.log("SandboxService initialized", {
         provider: sandboxConfig.provider,
-        mode: sandboxConfig.mode,
+        initMode: sandboxConfig.initMode,
+        sandboxScope: sandboxConfig.sandboxScope,
         region: sandboxConfig.region,
         useSnapshots: sandboxConfig.useSnapshots,
         deps: sandboxConfig.dependencies.map((d) => d.package),

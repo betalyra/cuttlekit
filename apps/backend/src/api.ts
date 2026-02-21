@@ -168,8 +168,12 @@ export const streamGroupLive = HttpApiBuilder.group(
             }
           }
 
+          const sessionService = yield* SessionService;
+          const session = yield* sessionService.getSession(path.sessionId);
+          const userId = session?.userId ?? "default-user";
+
           const registry = yield* ProcessorRegistry;
-          const processor = yield* registry.getOrCreate(path.sessionId);
+          const processor = yield* registry.getOrCreate(path.sessionId, userId);
           yield* registry.touch(path.sessionId);
 
           yield* Queue.offer(processor.actionQueue, {
@@ -192,9 +196,13 @@ export const streamGroupLive = HttpApiBuilder.group(
       )
       .handleRaw("subscribe", ({ path, urlParams }) =>
         Effect.gen(function* () {
+          const sessionService = yield* SessionService;
+          const session = yield* sessionService.getSession(path.sessionId);
+          const userId = session?.userId ?? "default-user";
+
           const registry = yield* ProcessorRegistry;
           const eventLog = yield* DurableEventLog;
-          const processor = yield* registry.getOrCreate(path.sessionId);
+          const processor = yield* registry.getOrCreate(path.sessionId, userId);
           yield* registry.touch(path.sessionId);
 
           const clientOffset = urlParams.offset ?? -1;
