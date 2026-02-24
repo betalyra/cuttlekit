@@ -106,9 +106,11 @@ export class GenerateService extends Effect.Service<GenerateService>()(
       ): Stream.Stream<UnifiedResponse, GenerationError | Error> =>
         Stream.unwrap(
           Effect.gen(function* () {
-            // TTFT tracking
+            // Timing tracking
             const streamStartTime = yield* DateTime.now;
             const firstTokenSeen = yield* Ref.make(false);
+            const lastEventTime = yield* Ref.make(streamStartTime);
+            const toolCallStart = yield* Ref.make(streamStartTime);
 
             const result = streamText({
               model: modelConfig.model,
@@ -137,6 +139,13 @@ export class GenerateService extends Effect.Service<GenerateService>()(
                 Effect.gen(function* () {
                   // Capture usage from finish-step using provider-specific extractor
                   if (part.type === "finish-step") {
+                    const now = yield* DateTime.now;
+                    const prev = yield* Ref.get(lastEventTime);
+                    const stepElapsed = Duration.toMillis(
+                      DateTime.distanceDuration(prev, now),
+                    );
+                    yield* Ref.set(lastEventTime, now);
+
                     const extracted = modelConfig.extractUsage(
                       part.usage as Record<string, unknown>,
                     );
@@ -151,6 +160,10 @@ export class GenerateService extends Effect.Service<GenerateService>()(
                         },
                       },
                     ]);
+                    yield* Effect.log("Step finished", {
+                      sinceLastEvent_ms: stepElapsed,
+                      outputTokens: extracted.outputTokens,
+                    });
                     return null;
                   }
 
@@ -158,20 +171,35 @@ export class GenerateService extends Effect.Service<GenerateService>()(
                     return null;
                   }
 
-                  // Log tool calls and results for observability
+                  // Log tool calls and results with timing
                   if (part.type === "tool-call") {
+                    const now = yield* DateTime.now;
+                    const prev = yield* Ref.get(lastEventTime);
+                    const sinceLastMs = Duration.toMillis(
+                      DateTime.distanceDuration(prev, now),
+                    );
+                    yield* Ref.set(toolCallStart, now);
+                    yield* Ref.set(lastEventTime, now);
                     const inputStr = JSON.stringify(part.input) ?? "";
                     yield* Effect.log("Tool call", {
                       tool: part.toolName,
                       args: inputStr.slice(0, 200),
+                      sinceLastEvent_ms: sinceLastMs,
                     });
                     return null;
                   }
 
                   if (part.type === "tool-result") {
+                    const now = yield* DateTime.now;
+                    const callStart = yield* Ref.get(toolCallStart);
+                    const toolDurationMs = Duration.toMillis(
+                      DateTime.distanceDuration(callStart, now),
+                    );
+                    yield* Ref.set(lastEventTime, now);
                     const outputStr = JSON.stringify(part.output) ?? "";
                     yield* Effect.log("Tool result", {
                       tool: part.toolName,
+                      duration_ms: toolDurationMs,
                       resultPreview: outputStr.slice(0, 300),
                       resultLength: outputStr.length,
                     });
@@ -179,19 +207,25 @@ export class GenerateService extends Effect.Service<GenerateService>()(
                   }
 
                   if (part.type === "text-delta") {
+                    const now = yield* DateTime.now;
                     const alreadySeen = yield* Ref.getAndSet(
                       firstTokenSeen,
                       true,
                     );
                     if (!alreadySeen) {
-                      const now = yield* DateTime.now;
                       const ttft = Duration.toMillis(
                         DateTime.distanceDuration(streamStartTime, now),
                       );
+                      const prev = yield* Ref.get(lastEventTime);
+                      const sinceLastMs = Duration.toMillis(
+                        DateTime.distanceDuration(prev, now),
+                      );
                       yield* Effect.log("Time to first token", {
                         ttft_ms: ttft,
+                        sinceLastEvent_ms: sinceLastMs,
                       });
                     }
+                    yield* Ref.set(lastEventTime, now);
                     return part.text;
                   }
 
