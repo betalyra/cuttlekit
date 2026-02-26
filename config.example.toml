@@ -1,0 +1,58 @@
+# Default model used when no model is selected in the UI.
+# Must match an id from one of the providers below.
+default_model = "moonshotai/kimi-k2-instruct-0905"
+
+# --- Model Providers ---
+# Each provider needs a matching <PROVIDER>_API_KEY env var.
+
+[providers.groq]
+
+[providers.groq.options]
+# Provider-specific options passed to the AI SDK
+openai = { streamOptions = { includeUsage = true } }
+
+[[providers.groq.models]]
+id = "moonshotai/kimi-k2-instruct-0905"
+label = "Kimi K2"
+
+[[providers.groq.models]]
+id = "openai/gpt-oss-120b"
+label = "GPT-OSS 120B"
+
+[providers.google]
+
+[providers.google.options]
+thinkingConfig = { thinkingLevel = "minimal" }
+
+[[providers.google.models]]
+id = "gemini-3-flash-preview"
+label = "Gemini 3 Flash"
+
+# --- Sandbox (optional) ---
+# Enables server-side code execution for LLM-generated code.
+# Remove this section entirely to disable sandboxing.
+
+[sandbox]
+provider = "deno"                # Currently only "deno" is supported
+init_mode = "lazy"               # "lazy" (boot on first use) or "eager" (boot on session start)
+sandbox_scope = "user"           # "user" (shared across sessions) or "session" (isolated per session)
+
+[sandbox.deno]
+region = "ams"                   # Deno Deploy region (ams, ord, etc.)
+use_snapshots = false            # Snapshot support (currently only ord region)
+snapshot_capacity_mb = 10000
+volume_capacity_mb = 5000
+timeout_seconds = 300
+memory_mb = 1280
+
+# --- Sandbox Dependencies (optional) ---
+# Packages available inside the sandbox. Each can have:
+#   - docs: URLs for documentation search
+#   - secret_env: env var name injected into the sandbox
+#   - hosts: allowed outbound hostnames
+
+[[sandbox.dependencies]]
+package = "@linear/sdk"
+docs = ["https://linear.app/developers/sdk.md"]
+secret_env = "LINEAR_API_KEY"
+hosts = ["api.linear.app"]

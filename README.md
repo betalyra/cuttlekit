@@ -1,60 +1,67 @@
-# Generative UI
+# cuttlekit
 
-What if your interface just... changed to fit what you're doing? 🤯
+cuttlekit is a generative UI toolkit that generates interactive UIs on the fly using LLMs.
 
-Need a quick todo list? You get a simple checkbox list. Running a business and need to track projects with deadlines, priorities, and team assignments? Same app, but now it's a full project manager. Want it in dark mode with bigger fonts? Just say so.
+> ⚠️ **Highly experimental** — APIs, config format, and behavior may change at any time. Expect rough edges.
 
-The AI generates the whole UI on the fly. You describe what you need, it builds it. You click around, interact with it, ask for tweaks. It remembers what you've done and builds on top of it.
+## Features
 
-```
-"I need a todo list"
-→ Simple todo app appears
+- 🎨 **Generate any UI** — Describe what you need and get a fully interactive interface, no predefined templates
+- ⚡ **Real-time streaming** — UI updates stream to the browser as the LLM generates them, near-instant feedback
+- 🛠️ **Sandbox code execution** — Integrate with external services and libraries through secure server-side TypeScript execution
+- 🌐 **Multi-model & provider** — Switch between LLM providers and models per request (Google, Groq, etc.)
+- 🧠 **Memory** — Remembers past interactions and patterns across sessions using vector-based semantic recall
+- 🧩 **Framework independent** — Pure HTML + CSS output, no React/Vue/Svelte required on the client
 
-"Add priority levels and due dates"
-→ Features added, existing todos preserved
+## Getting Started
 
-"Actually make it a kanban board"
-→ Same data, new layout 🪄
-```
+### Prerequisites
 
-## Try it
+- [Node.js](https://nodejs.org/) (v20+)
+- [pnpm](https://pnpm.io/) (v9+)
+
+### 1. Install dependencies
 
 ```bash
 pnpm install
-pnpm run dev:backend   # Terminal 1
+```
+
+### 2. Configure environment variables
+
+Copy the example env file and fill in your API keys:
+
+```bash
+cp .env.example .env
+```
+
+At minimum you need one provider API key matching a provider in your `config.toml` (e.g. `GOOGLE_API_KEY` for Google). See [.env.example](.env.example) for all options.
+
+### 3. Configure models & providers
+
+Copy the example config and adjust as needed:
+
+```bash
+cp config.example.toml config.toml
+```
+
+This is where you configure which LLM providers, models, and optional features (sandbox, dependencies) are available. See [config.example.toml](config.example.toml) for all options with comments.
+
+**Recommended setup:** Google with `gemini-3-flash-preview` offers a good balance of performance and quality. Groq is also supported with `openai/gpt-oss-120b` and `moonshotai/kimi-k2-instruct-0905` (Kimi K2) — faster, but don't match Gemini 3 Flash on quality.
+
+### 4. Run
+
+```bash
+pnpm run dev:backend   # Terminal 1 — auto-loads .env from project root
 pnpm run dev:webpage   # Terminal 2
 ```
 
-Then open http://localhost:5173
+If you manage env vars yourself (e.g. via 1Password CLI, direnv, shell exports), use the `no-env` variant instead:
 
-## How it works
+```bash
+pnpm run dev:backend:no-env
+```
 
-See [docs/APPROACH.md](docs/APPROACH.md) for the development journey and key decisions.
-
----
-
-## Roadmap / Ideas to Explore
-
-### Measurement First
-- **Test harness for performance** - Can't improve what we can't measure. Need baseline latency, token usage, and perceived speed metrics before optimizing.
-
-### Perceived Speed
-- **Stream HTML to frontend** - Show content as it generates instead of waiting for completion. First token in ~100ms vs full response in ~500ms.
-
-### Context Management
-- **Re-add conversation history with aggressive compaction** - Current HTML alone loses nuance. Implement rolling summaries: recent turns verbatim, older turns compressed to structured bullet points. See [docs/COMPACTION.md](docs/COMPACTION.md).
-
-### Multi-Page Support
-- **Backend-managed page state** - Current approach assumes single page. Need to store/switch between pages server-side while maintaining session continuity.
-
-### Speculative Execution
-- **Pre-generate on hover** - Start generating before user clicks. If hover→click takes 200ms and generation takes 200ms, click feels instant. See [docs/PERFORMANCE.md](docs/PERFORMANCE.md) for more techniques.
-
-### Tool Integration
-- **MCP support** - Add Model Context Protocol so AI can use external tools (databases, APIs, file systems) when building UIs.
-
-### Hybrid AI Architecture
-- **Browser-side AI for minor updates** - Use lightweight models (Chrome's Gemini Nano) for simple operations locally. Server generates templates, browser AI fills them in. Zero latency for cached actions.
+Then open http://localhost:5173 🚀
 
 ## License
 
@@ -63,3 +70,7 @@ This software is licensed under the [O'Saasy License Agreement](./LICENSE.md).
 **You are free to use, modify, and distribute this software** for personal projects, internal tools, or any use where you're not reselling the software's functionality itself.
 
 **A commercial license is required** if you want to offer this software (or derivatives) as a hosted, managed, or SaaS product where the primary value is the software's functionality. [Contact us](https://cal.com/betalyra/30min) for commercial licensing.
+
+## Contributing
+
+We welcome contributions via pull requests! 🎉 All contributors must sign our [Contributor License Agreement](./CLA.md) before a PR can be merged — the CLA bot will guide you through the process on your first PR.

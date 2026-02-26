@@ -11,6 +11,7 @@
     "build:webpage": "pnpm --filter @betalyra/generative-ui-webpage build",
     "preview:webpage": "pnpm --filter @betalyra/generative-ui-webpage preview",
     "dev:backend": "pnpm --filter @betalyra/generative-ui-backend dev",
+    "dev:backend:no-env": "pnpm --filter @betalyra/generative-ui-backend dev:no-env",
     "test:backend": "pnpm --filter @betalyra/generative-ui-backend test",
     "build:backend": "pnpm --filter @betalyra/generative-ui-backend build",
     "dev:common": "pnpm --filter @betalyra/generative-ui-common dev",
