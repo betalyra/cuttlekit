@@ -106,9 +106,15 @@ export class VdomService extends Effect.Service<VdomService>()("VdomService", {
         return registry
       })
 
+    const INITIAL_HTML = `<div id="root" class="min-h-screen bg-[#fafafa] text-[#0a0a0a] flex items-center justify-center"><div class="text-center"><h1 class="text-2xl font-bold uppercase tracking-tight mb-2">cuttlekit</h1><p class="text-sm text-[#525252]">Create any UI you like!</p></div></div>`
+
     const createSession = (sessionId: string) =>
       Effect.gen(function* () {
-        const window = yield* Effect.sync(() => new Window())
+        const window = yield* Effect.sync(() => {
+          const w = new Window()
+          w.document.body.innerHTML = INITIAL_HTML
+          return w
+        })
         yield* Ref.update(windowsRef, (windows) => {
           const newWindows = new Map(windows)
           newWindows.set(sessionId, window)
@@ -185,7 +191,7 @@ export class VdomService extends Effect.Service<VdomService>()("VdomService", {
               ? spec.props.map((p) => `${p}:string`).join(" ")
               : "(no props)"
             const hasChildren = spec.template.includes("data-children")
-            return `<${spec.tag} ${propsStr}> — ${hasChildren ? "container" : "leaf"}`
+            return `<${spec.tag} ${propsStr}> — ${hasChildren ? "container" : "leaf"}\n  template: ${spec.template}`
           }),
           (lines) => lines.join("\n")
         )
@@ -278,6 +284,39 @@ export class VdomService extends Effect.Service<VdomService>()("VdomService", {
         return { applied, total: patches.length, errors, html }
       })
 
+    const getCompactHtml = (sessionId: string) =>
+      Effect.gen(function* () {
+        const windows = yield* Ref.get(windowsRef)
+        const window = windows.get(sessionId)
+        if (!window) return null
+
+        const registry = yield* getRegistry(sessionId)
+        if (registry.size === 0) return window.document.body.innerHTML
+
+        // Clone to avoid mutating real VDOM
+        const clone = yield* Effect.sync(() =>
+          window.document.body.cloneNode(true) as unknown as HappyHTMLElement
+        )
+
+        // Strip rendered CE template content, keeping only data-children content
+        yield* pipe(
+          [...registry.keys()],
+          Effect.forEach((tag) =>
+            pipe(
+              [...clone.querySelectorAll(tag)],
+              Effect.forEach((el) =>
+                Effect.sync(() => {
+                  const childrenContainer = el.querySelector("[data-children]")
+                  el.innerHTML = childrenContainer ? childrenContainer.innerHTML : ""
+                }),
+              ),
+            ),
+          ),
+        )
+
+        return clone.innerHTML
+      })
+
     const deleteSession = (sessionId: string) =>
       Effect.gen(function* () {
         yield* Ref.update(windowsRef, (windows) => {
@@ -299,6 +338,7 @@ export class VdomService extends Effect.Service<VdomService>()("VdomService", {
     return {
       createSession,
       getHtml,
+      getCompactHtml,
       setHtml,
       define,
       getRegistry,

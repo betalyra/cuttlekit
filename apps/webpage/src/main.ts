@@ -51,15 +51,7 @@ type StreamState = {
   lastOffset: number;
 };
 
-// Initial intro HTML
-const INITIAL_HTML = `<div id="root" class="flex items-center justify-center min-h-[calc(100vh-4rem)]">
-  <div class="text-center max-w-md px-4">
-    <h1 class="text-2xl font-light text-[#0a0a0a] mb-4">Generative UI</h1>
-    <p class="text-sm text-[#525252] leading-relaxed">
-      Describe what you want to create. A dashboard, a form, a game — anything you can imagine.
-    </p>
-  </div>
-</div>`;
+// No splash screen — backend sends initial HTML via SSE bootstrap
 
 const loadStreamState = (): StreamState | null => {
   try {
@@ -413,14 +405,14 @@ const app = {
       return;
     }
 
-    this.getElements().contentEl.innerHTML = INITIAL_HTML;
+    this.getElements().contentEl.innerHTML = "";
     this.getElements().promptInput.value = "";
     this.updateStats();
     this.getElements().promptInput.focus();
   },
 
   async init() {
-    const { promptInput, sendBtn, resetBtn, contentEl } = this.getElements();
+    const { promptInput, sendBtn, resetBtn } = this.getElements();
 
     await this.fetchModels();
 
@@ -437,7 +429,6 @@ const app = {
         this.setError(err instanceof Error ? err.message : String(err));
         return;
       }
-      contentEl.innerHTML = INITIAL_HTML;
       this.setLoading(false, true);
     }
     this.connectSSE(this.sessionId);

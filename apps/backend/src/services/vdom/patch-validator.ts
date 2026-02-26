@@ -1,7 +1,7 @@
 import { Effect, Data, pipe } from "effect";
 import { Window } from "happy-dom";
 import { applyPatch, type Patch } from "@betalyra/generative-ui-common/client";
-import { makeCEShell, renderCETree, type Registry } from "./vdom.js";
+import { makeCEShell, renderCETree, type Registry, type ComponentSpec } from "./vdom.js";
 
 export type { Patch };
 
@@ -141,11 +141,55 @@ export class PatchValidator extends Effect.Service<PatchValidator>()(
           }
         });
 
+      /**
+       * Initialize registry from existing session specs.
+       * Call once after createValidationContext to mirror the session's CE state.
+       */
+      const initializeRegistry = (
+        ctx: ValidationContext,
+        specs: readonly ComponentSpec[],
+      ) =>
+        pipe(
+          specs,
+          Effect.forEach((spec) =>
+            Effect.sync(() => {
+              ctx.registry.set(spec.tag, spec);
+              if (!ctx.window.customElements.get(spec.tag)) {
+                ctx.window.customElements.define(
+                  spec.tag,
+                  makeCEShell(ctx.registry, spec.tag) as any,
+                );
+              }
+            }),
+          ),
+        );
+
+      /**
+       * Validate patches and run renderCETree for structural mutations,
+       * matching the behavior of VdomService.applyPatches.
+       */
+      const validateAllWithRender = (
+        ctx: ValidationContext,
+        patches: readonly Patch[],
+      ) =>
+        Effect.gen(function* () {
+          const result = yield* validateAll(ctx.doc, patches);
+          const hasStructuralMutation = patches.some(
+            (p) => "append" in p || "prepend" in p || "html" in p,
+          );
+          if (hasStructuralMutation && ctx.registry.size > 0) {
+            yield* renderCETree(ctx.window, ctx.registry);
+          }
+          return result;
+        });
+
       return {
         validate,
         validateAll,
+        validateAllWithRender,
         createValidationDocument,
         createValidationContext,
+        initializeRegistry,
         defineComponent,
         setFullHtml,
       };

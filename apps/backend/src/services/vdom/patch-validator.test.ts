@@ -259,6 +259,122 @@ describe("PatchValidator", () => {
     );
   });
 
+  describe("validateAllWithRender", () => {
+    it.effect("renders CEs after structural patches, matching real VDOM behavior", () =>
+      Effect.gen(function* () {
+        const validator = yield* PatchValidator;
+        const ctx = yield* validator.createValidationContext("");
+
+        // Define a CE with data-children container
+        yield* validator.defineComponent(ctx, {
+          tag: "my-card",
+          props: ["title"],
+          template:
+            "<div class='card'><h2>{title}</h2><div data-children></div></div>",
+        });
+
+        // Set full HTML with the CE
+        yield* validator.setFullHtml(
+          ctx,
+          '<div id="root"><my-card id="c1" title="Test"></my-card></div>'
+        );
+
+        // Append a loading element to the CE root
+        yield* validator.validateAllWithRender(ctx, [
+          { selector: "#c1", append: '<div id="loading">Loading...</div>' },
+        ]);
+
+        // After renderTree, #loading should be gone (wiped by CE re-render)
+        // so trying to remove it should fail — matching real VDOM behavior
+        const exit = yield* Effect.exit(
+          validator.validateAllWithRender(ctx, [
+            { selector: "#loading", remove: true },
+          ])
+        );
+
+        expect(Exit.isFailure(exit)).toBe(true);
+        if (Exit.isFailure(exit)) {
+          const error = exit.cause;
+          if (error._tag === "Fail") {
+            expect(error.error.reason).toBe("selector_not_found");
+          }
+        }
+      }).pipe(Effect.provide(PatchValidator.Default))
+    );
+
+    it.effect("preserves data-children content after structural patches", () =>
+      Effect.gen(function* () {
+        const validator = yield* PatchValidator;
+        const ctx = yield* validator.createValidationContext("");
+
+        yield* validator.defineComponent(ctx, {
+          tag: "my-card",
+          props: ["title"],
+          template:
+            "<div class='card'><h2>{title}</h2><div data-children></div></div>",
+        });
+
+        yield* validator.setFullHtml(
+          ctx,
+          '<div id="root"><my-card id="c1" title="Test"><span id="child">hello</span></my-card></div>'
+        );
+
+        // Append to #root (not the CE) — structural patch triggers renderTree
+        yield* validator.validateAllWithRender(ctx, [
+          { selector: "#root", append: '<div id="extra">extra</div>' },
+        ]);
+
+        // #child should still exist inside CE's data-children
+        const result = yield* validator.validateAllWithRender(ctx, [
+          { selector: "#child", text: "updated" },
+        ]);
+
+        expect(result).toHaveLength(1);
+      }).pipe(Effect.provide(PatchValidator.Default))
+    );
+  });
+
+  describe("initializeRegistry", () => {
+    it.effect("restores registry specs and renders CEs in validation context", () =>
+      Effect.gen(function* () {
+        const validator = yield* PatchValidator;
+
+        // Create context with HTML containing a CE tag
+        const ctx = yield* validator.createValidationContext(
+          '<div id="root"><my-widget id="w1" label="Hello"></my-widget></div>'
+        );
+
+        // Initialize registry with spec
+        yield* validator.initializeRegistry(ctx, [
+          {
+            tag: "my-widget",
+            props: ["label"],
+            template: "<div class='widget'><span id='lbl'>{label}</span></div>",
+            version: 1,
+          },
+        ]);
+
+        // CE not rendered yet — need to render
+        // After initializeRegistry, we still need renderTree for existing instances
+        // (initializeRegistry registers the CE but doesn't trigger connectedCallback)
+
+        // Patch targeting element inside CE template should fail before render
+        // but after setFullHtml (which calls renderTree), it should work
+        yield* validator.setFullHtml(
+          ctx,
+          '<div id="root"><my-widget id="w1" label="Hello"></my-widget></div>'
+        );
+
+        // Now #lbl should exist inside the rendered CE template
+        const result = yield* validator.validateAllWithRender(ctx, [
+          { selector: "#lbl", text: "World" },
+        ]);
+
+        expect(result).toHaveLength(1);
+      }).pipe(Effect.provide(PatchValidator.Default))
+    );
+  });
+
   describe("createValidationDocument", () => {
     it.effect("creates document with provided HTML", () =>
       Effect.gen(function* () {

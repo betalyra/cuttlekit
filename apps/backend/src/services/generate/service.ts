@@ -6,7 +6,7 @@ import {
 } from "@betalyra/generative-ui-common/server";
 import { MemoryService, type MemorySearchResult } from "../memory/index.js";
 import { accumulateLinesWithFlush } from "../../stream/utils.js";
-import { PatchValidator, type Patch, type ValidationContext } from "../vdom/index.js";
+import { PatchValidator, renderCETree, type Patch, type ValidationContext } from "../vdom/index.js";
 import { ModelRegistry } from "../model-registry.js";
 import {
   PatchSchema,
@@ -93,7 +93,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
           } else if (response.op === "full") {
             yield* patchValidator.setFullHtml(ctx, response.html);
           } else if (response.op === "patches") {
-            yield* patchValidator.validateAll(ctx.doc, response.patches);
+            yield* patchValidator.validateAllWithRender(ctx, response.patches);
           }
 
           return response;
@@ -452,7 +452,9 @@ export class GenerateService extends Effect.Service<GenerateService>()(
             onNone: () => "[COMPONENTS]\nNo components defined yet.",
             onSome: (c) => `[COMPONENTS]\n${c}`,
           });
-          const pageStatePart = Option.match(currentHtml, {
+          // Use compact HTML (CE templates stripped) for prompt, fall back to full HTML
+          const promptHtml = options.promptHtml ?? currentHtml;
+          const pageStatePart = Option.match(promptHtml, {
             onNone: () => "[PAGE STATE]\nEmpty — no UI rendered yet.",
             onSome: (h) => `[PAGE STATE]\n${h}`,
           });
@@ -482,6 +484,13 @@ export class GenerateService extends Effect.Service<GenerateService>()(
           const validationCtx = yield* patchValidator.createValidationContext(
             Option.getOrElse(currentHtml, () => ""),
           );
+
+          // Restore session's CE registry into validation context so
+          // renderTree matches real VDOM behavior after structural patches
+          if (options.registrySpecs && options.registrySpecs.length > 0) {
+            yield* patchValidator.initializeRegistry(validationCtx, options.registrySpecs);
+            yield* renderCETree(validationCtx.window, validationCtx.registry);
+          }
 
           // Create Refs to track state across retries
           const usageRef = yield* Ref.make<Usage[]>([]);
