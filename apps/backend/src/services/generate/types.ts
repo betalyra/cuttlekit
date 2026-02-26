@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { Option } from "effect";
 import type { Action } from "@betalyra/generative-ui-common/client";
 import type { SandboxContext } from "../sandbox/manager.js";
+import type { ComponentSpec } from "../vdom/vdom.js";
 
 // ============================================================
 // Zod Schemas
@@ -63,10 +64,12 @@ export type UnifiedResponse = z.infer<typeof UnifiedResponseSchema>;
 export type UnifiedGenerateOptions = {
   sessionId: string;
   currentHtml: Option.Option<string>;
+  promptHtml?: Option.Option<string>;
   catalog: Option.Option<string>;
   actions: readonly Action[];
   modelId?: string;
   sandboxCtx?: SandboxContext;
+  registrySpecs?: readonly ComponentSpec[];
 };
 
 // ============================================================

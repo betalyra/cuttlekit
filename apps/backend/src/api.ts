@@ -6,7 +6,7 @@ import {
   HttpApiGroup,
   HttpServerResponse,
 } from "@effect/platform";
-import { Effect, PubSub, Queue, Schema, Stream, pipe } from "effect";
+import { Effect, Option, PubSub, Queue, Schema, Stream, pipe } from "effect";
 import {
   ProcessorRegistry,
   DurableEventLog,
@@ -218,11 +218,40 @@ export const streamGroupLive = HttpApiBuilder.group(
               );
 
               // STEP 0: Bootstrap on page refresh (offset === -1)
-              // Send current registry as define events + current HTML
+              // Recover VDOM state if lost (server restart), then send
+              // current registry + HTML so the client has full state.
               const bootstrapStream =
                 clientOffset === -1
                   ? Stream.unwrap(
                       Effect.gen(function* () {
+                        // Recovery: restore VDOM from snapshot if gone
+                        const existingHtml = yield* vdomService.getHtml(
+                          path.sessionId
+                        );
+                        if (!existingHtml) {
+                          const snapshot = yield* sessionService.getSnapshot(
+                            path.sessionId
+                          );
+                          if (Option.isSome(snapshot)) {
+                            const { registry, html } = snapshot.value;
+                            if (registry.length > 0) {
+                              yield* vdomService.restoreRegistry(
+                                path.sessionId,
+                                registry
+                              );
+                            }
+                            if (html) {
+                              yield* vdomService.setHtml(
+                                path.sessionId,
+                                html
+                              );
+                              yield* vdomService.renderTree(path.sessionId);
+                            }
+                          } else {
+                            yield* vdomService.createSession(path.sessionId);
+                          }
+                        }
+
                         const registry = yield* vdomService.getRegistry(
                           path.sessionId
                         );
@@ -258,9 +287,13 @@ export const streamGroupLive = HttpApiBuilder.group(
                     )
                   : Stream.empty;
 
-              // STEP 2: Read missed events from DB (skip for bootstrap)
+              // STEP 2: Read missed events from DB
+              // For bootstrap (offset -1), skip replay — bootstrap already
+              // sent current state. Only forward new live events.
               const effectiveOffset =
-                clientOffset === -1 ? -1 : clientOffset;
+                clientOffset === -1
+                  ? yield* eventLog.getLatestOffset(path.sessionId)
+                  : clientOffset;
               const missedRows = yield* eventLog.readFrom(
                 path.sessionId,
                 effectiveOffset

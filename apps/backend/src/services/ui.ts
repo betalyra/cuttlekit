@@ -44,6 +44,9 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
               yield* vdomService.setHtml(sessionId, html);
               yield* vdomService.renderTree(sessionId);
             }
+          } else {
+            // Brand new session — initialize VDOM with initial HTML
+            yield* vdomService.createSession(sessionId);
           }
         }
 
@@ -91,14 +94,27 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
               yield* vdomService.getCatalog(sessionId),
             );
 
+        // Get compact HTML (CE templates stripped) for prompt context
+        const promptHtml = isResetAction
+          ? Option.none<string>()
+          : Option.fromNullable(
+              yield* vdomService.getCompactHtml(sessionId),
+            );
+
+        // Get registry specs for validation context CE rendering
+        const registry = yield* vdomService.getRegistry(sessionId);
+        const registrySpecs = isResetAction ? undefined : [...registry.values()];
+
         // Pass the full actions array to the generate service
         const unifiedStream = yield* generateService.streamUnified({
           sessionId,
           currentHtml: isResetAction ? Option.none() : currentHtml,
+          promptHtml,
           catalog,
           actions: request.actions,
           modelId: request.modelId,
           sandboxCtx: request.sandboxCtx,
+          registrySpecs,
         });
 
         // Start with session event
