@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, Option, Schema } from "effect";
 import { eq, desc } from "drizzle-orm";
 import { Database } from "./database.js";
 import {
@@ -9,6 +9,24 @@ import {
   type NewSessionMemoryEntry,
   type NewDocChunk,
 } from "./schema.js";
+
+// ============================================================
+// Session Snapshot Schema (validated on read from DB)
+// ============================================================
+
+const ComponentSpecSchema = Schema.Struct({
+  tag: Schema.String,
+  props: Schema.Array(Schema.String),
+  template: Schema.String,
+  version: Schema.Number,
+});
+
+export const SessionSnapshotSchema = Schema.Struct({
+  html: Schema.String,
+  registry: Schema.Array(ComponentSpecSchema),
+});
+
+export type SessionSnapshot = typeof SessionSnapshotSchema.Type;
 
 export class StoreService extends Effect.Service<StoreService>()(
   "StoreService",
@@ -194,6 +212,42 @@ export class StoreService extends Effect.Service<StoreService>()(
           }));
         });
 
+      // ============ SESSION SNAPSHOTS ============
+
+      const saveSnapshot = (sessionId: string, snapshot: SessionSnapshot) =>
+        Effect.promise(() =>
+          db
+            .update(sessions)
+            .set({ snapshot })
+            .where(eq(sessions.id, sessionId))
+        );
+
+      const getSnapshot = (sessionId: string) =>
+        Effect.gen(function* () {
+          const result = yield* Effect.promise(() =>
+            db
+              .select({ snapshot: sessions.snapshot })
+              .from(sessions)
+              .where(eq(sessions.id, sessionId))
+          );
+          const raw = result[0]?.snapshot;
+          if (!raw) return Option.none<SessionSnapshot>();
+
+          // Parse with Effect Schema — fallback to none if corrupted
+          return yield* Schema.decodeUnknown(SessionSnapshotSchema)(raw).pipe(
+            Effect.map(Option.some),
+            Effect.catchAll((error) =>
+              Effect.gen(function* () {
+                yield* Effect.logWarning("Failed to parse session snapshot", {
+                  sessionId,
+                  error: String(error),
+                });
+                return Option.none<SessionSnapshot>();
+              })
+            ),
+          );
+        });
+
       return {
         // Sessions
         insertSession,
@@ -206,6 +260,9 @@ export class StoreService extends Effect.Service<StoreService>()(
         insertMemoryEntry,
         getRecentEntries,
         searchByVector,
+        // Snapshots
+        saveSnapshot,
+        getSnapshot,
         // Doc chunks
         getDocChunkHash,
         upsertDocChunk,

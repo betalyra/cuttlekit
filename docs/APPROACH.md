@@ -517,6 +517,26 @@ const UnifiedResponseSchema = z.union([
 
 ---
 
+## Step 27: Component Registry Integration
+
+**Problem:** Output tokens are the dominant cost. A single ticket patch uses ~434 tokens; 7 tickets = ~3,000 tokens (~50% of total generation). The LLM has no way to say "this looks like that but with different data."
+
+**Solution:** Reusable component specs via a `define` op. The LLM defines a component once (`{"op":"define","tag":"project-card","props":["name","status"],"template":"<div class='...'>{name}</div>"}`), then uses compact custom element tags in patches (`<project-card name="Alpha" status="Active">`). Token cost per item drops from ~150 to ~25 (~6x reduction).
+
+**Key decisions:**
+- **Backend is sole source of truth** — removed `currentHtml` from client→server flow entirely. Server VDOM + registry are authoritative.
+- **`op` discriminant** — all LLM response types use `op` (not `type`) as the discriminant field: `patches`, `full`, `define`, `stats`
+- **Option types** — `currentHtml` and `catalog` use Effect `Option<string>` in `UnifiedGenerateOptions` instead of optional fields
+- **DB snapshot persistence** — `snapshot` JSON column on `sessions` table stores HTML + registry after each generation. Effect Schema validates on read with fallback to `Option.none()` on parse failure
+- **SSE bootstrap** — when client connects with `offset=-1` (page refresh), server sends current registry as `define` events + current HTML before live events
+- **VdomService owns the registry** — per-session `Map<string, ComponentSpec>` alongside existing Window map, with `define`, `getRegistry`, `getCatalog`, `restoreRegistry`, `renderTree` methods
+- **Light DOM with `[data-children]`** — no shadow DOM. CE shell is a thin class registered once per tag; on redefine, only the registry entry updates
+- **Prompt structure** — `[COMPONENTS]` catalog placed before `[PAGE STATE]` for cache alignment. Empty state explicitly communicated ("No components defined yet." / "Empty — no UI rendered yet.")
+
+**Result:** Identical rendering in happy-dom (server) and browser (client). All 31 tests pass. The LLM can define components, use them in patches, and restyle all instances with a single `define` — O(1) in output tokens regardless of instance count.
+
+---
+
 ## Key Takeaways
 
 1. **Plain HTML over JSX** - AI can steer a responsive frontend by generating plain HTML

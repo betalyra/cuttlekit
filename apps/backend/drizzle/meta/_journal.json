@@ -43,6 +43,13 @@
       "when": 1771686581681,
       "tag": "0005_bent_secret_warriors",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1772095501977,
+      "tag": "0006_steep_felicia_hardy",
+      "breakpoints": true
     }
   ]
 }

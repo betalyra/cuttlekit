@@ -16,6 +16,7 @@ import {
 } from "./services/durable/index.js";
 import { SessionService } from "./services/session.js";
 import { ModelRegistry } from "./services/model-registry.js";
+import { VdomService } from "./services/vdom/index.js";
 
 // ============================================================
 // SSE formatting
@@ -181,7 +182,6 @@ export const streamGroupLive = HttpApiBuilder.group(
             prompt: payload.prompt,
             action: payload.action,
             actionData: payload.actionData,
-            currentHtml: payload.currentHtml,
             model: payload.model,
           });
 
@@ -206,6 +206,7 @@ export const streamGroupLive = HttpApiBuilder.group(
           yield* registry.touch(path.sessionId);
 
           const clientOffset = urlParams.offset ?? -1;
+          const vdomService = yield* VdomService;
 
           // Use unwrapScoped so the PubSub subscription lives as long as
           // the SSE stream (not the handler effect's scope).
@@ -216,15 +217,58 @@ export const streamGroupLive = HttpApiBuilder.group(
                 processor.eventPubSub
               );
 
-              // STEP 2: Read missed events from DB
+              // STEP 0: Bootstrap on page refresh (offset === -1)
+              // Send current registry as define events + current HTML
+              const bootstrapStream =
+                clientOffset === -1
+                  ? Stream.unwrap(
+                      Effect.gen(function* () {
+                        const registry = yield* vdomService.getRegistry(
+                          path.sessionId
+                        );
+                        const defineEvents = [...registry.values()].map(
+                          (spec, i) =>
+                            ({
+                              type: "define" as const,
+                              tag: spec.tag,
+                              props: [...spec.props],
+                              template: spec.template,
+                              offset: -(registry.size - i),
+                            }) as StreamEventWithOffset
+                        );
+
+                        const html = yield* vdomService.getHtml(
+                          path.sessionId
+                        );
+                        const htmlEvents = html
+                          ? [
+                              {
+                                type: "html" as const,
+                                html,
+                                offset: 0,
+                              } as StreamEventWithOffset,
+                            ]
+                          : [];
+
+                        return Stream.fromIterable([
+                          ...defineEvents,
+                          ...htmlEvents,
+                        ]);
+                      })
+                    )
+                  : Stream.empty;
+
+              // STEP 2: Read missed events from DB (skip for bootstrap)
+              const effectiveOffset =
+                clientOffset === -1 ? -1 : clientOffset;
               const missedRows = yield* eventLog.readFrom(
                 path.sessionId,
-                clientOffset
+                effectiveOffset
               );
               const dbMaxOffset =
                 missedRows.length > 0
                   ? missedRows[missedRows.length - 1].offset
-                  : clientOffset;
+                  : effectiveOffset;
 
               // STEP 3: Convert DB rows to events with offset
               const missedStream = Stream.fromIterable(
@@ -240,8 +284,11 @@ export const streamGroupLive = HttpApiBuilder.group(
                 Stream.filter((event) => event.offset > dbMaxOffset)
               );
 
-              // STEP 5: Compose: replay first, then live
-              return Stream.concat(missedStream, deduplicatedPubSubStream);
+              // STEP 5: Compose: bootstrap → replay → live
+              return Stream.concat(
+                bootstrapStream,
+                Stream.concat(missedStream, deduplicatedPubSubStream)
+              );
             })
           );
 

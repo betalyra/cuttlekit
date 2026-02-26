@@ -1,5 +1,5 @@
 import { Array as A, Effect, pipe, Ref } from "effect"
-import { Window } from "happy-dom"
+import { Window, HTMLElement as HappyHTMLElement } from "happy-dom"
 import {
   applyPatch,
   type Patch,
@@ -7,6 +7,19 @@ import {
 } from "@betalyra/generative-ui-common/client"
 
 export type { Patch }
+
+// ============================================================
+// Types
+// ============================================================
+
+export type ComponentSpec = {
+  readonly tag: string
+  readonly props: readonly string[]
+  readonly template: string
+  readonly version: number
+}
+
+export type Registry = Map<string, ComponentSpec>
 
 export type ApplyPatchesResult = {
   applied: number
@@ -16,14 +29,82 @@ export type ApplyPatchesResult = {
 }
 
 // ============================================================
-// VdomService - Manages happy-dom instances per session
+// CE rendering helpers
+// ============================================================
+
+const interpolate = (template: string, props: readonly string[], el: HappyHTMLElement) =>
+  props.reduce(
+    (acc, prop) => acc.replaceAll(`{${prop}}`, el.getAttribute(prop) ?? ""),
+    template
+  )
+
+const makeCEShell = (registry: Registry, tag: string) => {
+  const props = registry.get(tag)?.props ?? []
+  return class extends HappyHTMLElement {
+    static observedAttributes = [...props]
+    connectedCallback() {}
+    attributeChangedCallback() { if (this.isConnected) (this as any).render() }
+    render() {
+      const spec = registry.get(tag)
+      if (!spec) return
+      const existing = this.querySelector("[data-children]")
+      const children = [...(existing ?? this).children]
+      this.innerHTML = interpolate(spec.template, spec.props, this)
+      const container = this.querySelector("[data-children]")
+      if (container) children.forEach((c) => container.appendChild(c))
+    }
+  }
+}
+
+const renderTree = (win: InstanceType<typeof Window>, registry: Registry) =>
+  pipe(
+    [...win.document.querySelectorAll("*")]
+      .filter((el) => registry.has(el.tagName.toLowerCase())),
+    Effect.forEach((el) => Effect.sync(() => (el as any).render()))
+  )
+
+// Exported for PatchValidator's validation context
+export { makeCEShell, renderTree as renderCETree }
+
+// ============================================================
+// VdomService - Manages happy-dom instances + component registry per session
 // ============================================================
 
 export class VdomService extends Effect.Service<VdomService>()("VdomService", {
   accessors: true,
   effect: Effect.gen(function* () {
-    // Store happy-dom Window instances per session
     const windowsRef = yield* Ref.make(new Map<string, Window>())
+    const registriesRef = yield* Ref.make(new Map<string, Registry>())
+
+    const getOrCreateWindow = (sessionId: string) =>
+      Effect.gen(function* () {
+        const windows = yield* Ref.get(windowsRef)
+        const existing = windows.get(sessionId)
+        if (existing) return existing
+
+        const window = yield* Effect.sync(() => new Window())
+        yield* Ref.update(windowsRef, (w) => {
+          const newWindows = new Map(w)
+          newWindows.set(sessionId, window)
+          return newWindows
+        })
+        return window
+      })
+
+    const getOrCreateRegistry = (sessionId: string) =>
+      Effect.gen(function* () {
+        const registries = yield* Ref.get(registriesRef)
+        const existing = registries.get(sessionId)
+        if (existing) return existing
+
+        const registry: Registry = new Map()
+        yield* Ref.update(registriesRef, (r) => {
+          const newRegistries = new Map(r)
+          newRegistries.set(sessionId, registry)
+          return newRegistries
+        })
+        return registry
+      })
 
     const createSession = (sessionId: string) =>
       Effect.gen(function* () {
@@ -32,6 +113,11 @@ export class VdomService extends Effect.Service<VdomService>()("VdomService", {
           const newWindows = new Map(windows)
           newWindows.set(sessionId, window)
           return newWindows
+        })
+        yield* Ref.update(registriesRef, (registries) => {
+          const newRegistries = new Map(registries)
+          newRegistries.set(sessionId, new Map())
+          return newRegistries
         })
       })
 
@@ -44,24 +130,101 @@ export class VdomService extends Effect.Service<VdomService>()("VdomService", {
 
     const setHtml = (sessionId: string, html: string) =>
       Effect.gen(function* () {
-        const windows = yield* Ref.get(windowsRef)
-        const existingWindow = windows.get(sessionId)
+        const window = yield* getOrCreateWindow(sessionId)
+        yield* Effect.sync(() => {
+          window.document.body.innerHTML = html
+        })
+      })
 
-        if (existingWindow) {
-          yield* Effect.sync(() => {
-            existingWindow.document.body.innerHTML = html
-          })
-        } else {
-          const window = yield* Effect.sync(() => new Window())
-          yield* Effect.sync(() => {
-            window.document.body.innerHTML = html
-          })
-          yield* Ref.update(windowsRef, (w) => {
-            const newWindows = new Map(w)
-            newWindows.set(sessionId, window)
-            return newWindows
-          })
+    const define = (
+      sessionId: string,
+      op: { tag: string; props: string[]; template: string }
+    ) =>
+      Effect.gen(function* () {
+        const window = yield* getOrCreateWindow(sessionId)
+        const registry = yield* getOrCreateRegistry(sessionId)
+
+        const existing = registry.get(op.tag)
+        const version = existing ? existing.version + 1 : 1
+        registry.set(op.tag, {
+          tag: op.tag,
+          props: op.props,
+          template: op.template,
+          version,
+        })
+
+        if (!window.customElements.get(op.tag)) {
+          window.customElements.define(
+            op.tag,
+            makeCEShell(registry, op.tag) as any
+          )
         }
+
+        // Re-render existing instances of this tag
+        yield* pipe(
+          [...window.document.querySelectorAll(op.tag)],
+          Effect.forEach((el) => Effect.sync(() => (el as any).render()))
+        )
+      })
+
+    const getRegistry = (sessionId: string) =>
+      Effect.gen(function* () {
+        const registries = yield* Ref.get(registriesRef)
+        return registries.get(sessionId) ?? new Map<string, ComponentSpec>()
+      })
+
+    const getCatalog = (sessionId: string) =>
+      Effect.gen(function* () {
+        const registry = yield* getRegistry(sessionId)
+        if (registry.size === 0) return null
+
+        return pipe(
+          [...registry.values()],
+          A.map((spec) => {
+            const propsStr = spec.props.length > 0
+              ? spec.props.map((p) => `${p}:string`).join(" ")
+              : "(no props)"
+            const hasChildren = spec.template.includes("data-children")
+            return `<${spec.tag} ${propsStr}> — ${hasChildren ? "container" : "leaf"}`
+          }),
+          (lines) => lines.join("\n")
+        )
+      })
+
+    const restoreRegistry = (
+      sessionId: string,
+      specs: readonly ComponentSpec[]
+    ) =>
+      Effect.gen(function* () {
+        const window = yield* getOrCreateWindow(sessionId)
+        const registry = yield* getOrCreateRegistry(sessionId)
+
+        yield* pipe(
+          specs,
+          Effect.forEach((spec) =>
+            Effect.sync(() => {
+              registry.set(spec.tag, spec)
+              if (!window.customElements.get(spec.tag)) {
+                window.customElements.define(
+                  spec.tag,
+                  makeCEShell(registry, spec.tag) as any
+                )
+              }
+            })
+          )
+        )
+      })
+
+    const renderAllCEs = (sessionId: string) =>
+      Effect.gen(function* () {
+        const windows = yield* Ref.get(windowsRef)
+        const window = windows.get(sessionId)
+        if (!window) return
+
+        const registry = yield* getRegistry(sessionId)
+        if (registry.size === 0) return
+
+        yield* renderTree(window, registry)
       })
 
     const applyPatches = (sessionId: string, patches: Patch[]) =>
@@ -99,22 +262,51 @@ export class VdomService extends Effect.Service<VdomService>()("VdomService", {
           A.length
         )
 
+        // Render CEs after structural mutations
+        const hasStructuralMutation = patches.some(
+          (p) => "append" in p || "prepend" in p || "html" in p
+        )
+        if (hasStructuralMutation) {
+          const registry = yield* getRegistry(sessionId)
+          if (registry.size > 0) {
+            yield* renderTree(window, registry)
+          }
+        }
+
         const html = window.document.body.innerHTML
 
         return { applied, total: patches.length, errors, html }
       })
 
     const deleteSession = (sessionId: string) =>
-      Ref.update(windowsRef, (windows) => {
-        const window = windows.get(sessionId)
-        if (window) {
-          window.close()
-        }
-        const newWindows = new Map(windows)
-        newWindows.delete(sessionId)
-        return newWindows
+      Effect.gen(function* () {
+        yield* Ref.update(windowsRef, (windows) => {
+          const window = windows.get(sessionId)
+          if (window) {
+            window.close()
+          }
+          const newWindows = new Map(windows)
+          newWindows.delete(sessionId)
+          return newWindows
+        })
+        yield* Ref.update(registriesRef, (registries) => {
+          const newRegistries = new Map(registries)
+          newRegistries.delete(sessionId)
+          return newRegistries
+        })
       })
 
-    return { createSession, getHtml, setHtml, applyPatches, deleteSession }
+    return {
+      createSession,
+      getHtml,
+      setHtml,
+      define,
+      getRegistry,
+      getCatalog,
+      restoreRegistry,
+      renderTree: renderAllCEs,
+      applyPatches,
+      deleteSession,
+    }
   }),
 }) {}

@@ -6,7 +6,7 @@ import {
 } from "@betalyra/generative-ui-common/server";
 import { MemoryService, type MemorySearchResult } from "../memory/index.js";
 import { accumulateLinesWithFlush } from "../../stream/utils.js";
-import { PatchValidator, type Patch } from "../vdom/index.js";
+import { PatchValidator, type Patch, type ValidationContext } from "../vdom/index.js";
 import { ModelRegistry } from "../model-registry.js";
 import {
   PatchSchema,
@@ -63,7 +63,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
           const patchResult = PatchSchema.safeParse(parseResult);
           if (patchResult.success) {
             return {
-              type: "patches" as const,
+              op: "patches" as const,
               patches: [patchResult.data],
             };
           }
@@ -80,15 +80,20 @@ export class GenerateService extends Effect.Service<GenerateService>()(
       // ============================================================
       const parseAndValidate = (
         line: string,
-        validationDoc: Document,
+        ctx: ValidationContext,
       ): Effect.Effect<UnifiedResponse, GenerationError> =>
         Effect.gen(function* () {
           // Parse JSON (fails with JsonParseError)
           const response = yield* parseJsonLine(line);
 
-          // Validate patches (fails with PatchValidationError)
-          if (response.type === "patches") {
-            yield* patchValidator.validateAll(validationDoc, response.patches);
+          // Update validation context for define/full ops so subsequent
+          // patches can target elements inside CE templates
+          if (response.op === "define") {
+            yield* patchValidator.defineComponent(ctx, response);
+          } else if (response.op === "full") {
+            yield* patchValidator.setFullHtml(ctx, response.html);
+          } else if (response.op === "patches") {
+            yield* patchValidator.validateAll(ctx.doc, response.patches);
           }
 
           return response;
@@ -99,7 +104,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
       // ============================================================
       const createAttemptStream = (
         messages: readonly Message[],
-        validationDoc: Document,
+        validationCtx: ValidationContext,
         usageRef: Ref.Ref<Usage[]>,
         modelConfig: LanguageModelConfig,
         requestTools?: SandboxTools,
@@ -238,7 +243,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
               accumulateLinesWithFlush,
               Stream.tap((line) => Effect.log("Line", { line })),
               // Parse and validate each line
-              Stream.mapEffect((line) => parseAndValidate(line, validationDoc)),
+              Stream.mapEffect((line) => parseAndValidate(line, validationCtx)),
             );
           }),
         );
@@ -248,7 +253,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
       // ============================================================
       const createStreamWithRetry = (
         messages: readonly Message[],
-        validationDoc: Document,
+        validationCtx: ValidationContext,
         usageRef: Ref.Ref<Usage[]>,
         patchesRef: Ref.Ref<Patch[]>,
         modeRef: Ref.Ref<"patches" | "full">,
@@ -265,7 +270,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
         return pipe(
           createAttemptStream(
             messages,
-            validationDoc,
+            validationCtx,
             usageRef,
             modelConfig,
             requestTools,
@@ -274,16 +279,16 @@ export class GenerateService extends Effect.Service<GenerateService>()(
           // Track successful patches, mode, and log
           Stream.tap((response) =>
             Effect.gen(function* () {
-              if (response.type === "patches") {
+              if (response.op === "patches") {
                 yield* Ref.update(patchesRef, (ps) => [
                   ...ps,
                   ...response.patches,
                 ]);
-              } else if (response.type === "full") {
+              } else if (response.op === "full") {
                 yield* Ref.set(modeRef, "full");
               }
               yield* Effect.log(`[Attempt ${attempt}] Emitting response`, {
-                type: response.type,
+                op: response.op,
               });
             }),
           ),
@@ -321,7 +326,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
                         ),
                       },
                     ],
-                    validationDoc,
+                    validationCtx,
                     usageRef,
                     patchesRef,
                     modeRef,
@@ -341,7 +346,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
       // ============================================================
       const streamUnified = (options: UnifiedGenerateOptions) =>
         Effect.gen(function* () {
-          const { sessionId, currentHtml, actions } = options;
+          const { sessionId, currentHtml, catalog, actions } = options;
 
           const modelConfig = options.modelId
             ? yield* modelRegistry.resolve(options.modelId)
@@ -372,7 +377,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
             provider: modelConfig.providerName,
             model: options.modelId ?? "default",
             actionCount: actions.length,
-            hasCurrentHtml: !!currentHtml,
+            hasCurrentHtml: Option.isSome(currentHtml),
           });
 
           // Build memory search query from all actions/prompts
@@ -442,9 +447,18 @@ export class GenerateService extends Effect.Service<GenerateService>()(
 
           // Message structure optimized for prompt caching:
           // 1. System prompt (static - always cached)
-          // 2. Single user message: HTML → History → [NOW] (most volatile last)
+          // 2. Single user message: Components → Page State → History → [NOW] (most volatile last)
+          const componentsPart = Option.match(catalog, {
+            onNone: () => "[COMPONENTS]\nNo components defined yet.",
+            onSome: (c) => `[COMPONENTS]\n${c}`,
+          });
+          const pageStatePart = Option.match(currentHtml, {
+            onNone: () => "[PAGE STATE]\nEmpty — no UI rendered yet.",
+            onSome: (h) => `[PAGE STATE]\n${h}`,
+          });
           const userContent = [
-            currentHtml ? `HTML:\n${currentHtml}` : null,
+            componentsPart,
+            pageStatePart,
             ...historyParts,
             actionPart,
           ]
@@ -464,9 +478,9 @@ export class GenerateService extends Effect.Service<GenerateService>()(
           // Log prompt to file if enabled
           yield* promptLogger.logMessages(messages);
 
-          // Create validation document from current HTML (or empty)
-          const validationDoc = yield* patchValidator.createValidationDocument(
-            currentHtml ?? "",
+          // Create CE-aware validation context from current HTML (or empty)
+          const validationCtx = yield* patchValidator.createValidationContext(
+            Option.getOrElse(currentHtml, () => ""),
           );
 
           // Create Refs to track state across retries
@@ -478,7 +492,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
           // Create the streaming pipeline with retry - TRUE STREAMING!
           const contentStream = createStreamWithRetry(
             messages,
-            validationDoc,
+            validationCtx,
             usageRef,
             patchesRef,
             modeRef,
@@ -543,7 +557,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
               const patches = yield* Ref.get(patchesRef);
 
               return {
-                type: "stats" as const,
+                op: "stats" as const,
                 cacheRate: Math.round(cacheRate),
                 tokensPerSecond: Math.round(tokensPerSecond),
                 mode,

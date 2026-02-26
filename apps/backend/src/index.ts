@@ -154,6 +154,7 @@ const ApiLive = HttpApiBuilder.api(api).pipe(
   Layer.provide(streamGroupLive),
   Layer.provide(SessionWithDeps),
   Layer.provide(ModelRegistryLive),
+  Layer.provide(VdomService.Default),
   Layer.provide(RegistryWithDeps),
   Layer.provide(EventLogWithDeps),
   Layer.provide(BackgroundJobs),
