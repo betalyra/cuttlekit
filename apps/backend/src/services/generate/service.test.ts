@@ -4,7 +4,6 @@ import { MockLanguageModelV3 } from "ai/test";
 import { simulateReadableStream } from "ai";
 import type { LanguageModelV3StreamPart } from "@ai-sdk/provider";
 import { GenerateService } from "./service.js";
-import { PromptLogger } from "./prompt-logger.js";
 import { TestLanguageModelLayer } from "@betalyra/generative-ui-common/server";
 import { PatchValidator } from "../vdom/index.js";
 import { MemoryService } from "../memory/index.js";
@@ -80,10 +79,6 @@ const MockMemoryLayer = Layer.succeed(MemoryService, {
   describePatches: () => "",
 } as unknown as MemoryService);
 
-const MockPromptLoggerLayer = Layer.succeed(PromptLogger, {
-  logMessages: () => Effect.void,
-} as unknown as PromptLogger);
-
 const MockModelRegistryLayer = Layer.succeed(ModelRegistry, {
   resolve: () => Effect.fail(new Error("not configured")),
   availableModels: () => [],
@@ -109,7 +104,6 @@ const createTestLayer = (mockModel: ReturnType<typeof createMockModel>) =>
     Layer.provide(TestLanguageModelLayer(mockModel)),
     Layer.provide(MockMemoryLayer),
     Layer.provide(PatchValidator.Default),
-    Layer.provide(MockPromptLoggerLayer),
     Layer.provide(MockModelRegistryLayer),
     Layer.provide(MockToolServiceLayer),
   );
@@ -186,7 +180,6 @@ const createToolTestLayer = (
     Layer.provide(TestLanguageModelLayer(mockModel)),
     Layer.provide(MockMemoryLayer),
     Layer.provide(PatchValidator.Default),
-    Layer.provide(MockPromptLoggerLayer),
     Layer.provide(MockModelRegistryLayer),
     Layer.provide(
       ToolService.Default.pipe(
