@@ -207,7 +207,8 @@ describe("GenerateService", () => {
         const service = yield* GenerateService;
         const stream = yield* service.streamUnified({
           sessionId: "test",
-          currentHtml: '<div id="app">old</div>',
+          currentHtml: Option.some('<div id="app">old</div>'),
+          catalog: Option.none(),
           actions: [{ type: "prompt", prompt: "Say hello" }],
         });
 
@@ -216,12 +217,12 @@ describe("GenerateService", () => {
 
         expect(items.length).toBe(2); // patches + stats
         expect(items[0]).toEqual({
-          type: "patches",
+          op: "patches",
           patches: [{ selector: "#app", text: "Hello" }],
         });
-        expect(items[1].type).toBe("stats");
+        expect(items[1].op).toBe("stats");
       }).pipe(Effect.provide(createTestLayer(createMockModel([
-        '{"type":"patches","patches":[{"selector":"#app","text":"Hello"}]}\n',
+        '{"op":"patches","patches":[{"selector":"#app","text":"Hello"}]}\n',
       ]))))
     );
 
@@ -230,6 +231,8 @@ describe("GenerateService", () => {
         const service = yield* GenerateService;
         const stream = yield* service.streamUnified({
           sessionId: "test",
+          currentHtml: Option.none(),
+          catalog: Option.none(),
           actions: [{ type: "prompt", prompt: "Create app" }],
         });
 
@@ -237,11 +240,11 @@ describe("GenerateService", () => {
         const items = Chunk.toArray(results);
 
         expect(items[0]).toEqual({
-          type: "full",
+          op: "full",
           html: "<div id='app'>New content</div>",
         });
       }).pipe(Effect.provide(createTestLayer(createMockModel([
-        `{"type":"full","html":"<div id='app'>New content</div>"}\n`,
+        `{"op":"full","html":"<div id='app'>New content</div>"}\n`,
       ]))))
     );
 
@@ -250,7 +253,8 @@ describe("GenerateService", () => {
         const service = yield* GenerateService;
         const stream = yield* service.streamUnified({
           sessionId: "test",
-          currentHtml: '<div id="a">old</div><div id="b">old</div>',
+          currentHtml: Option.some('<div id="a">old</div><div id="b">old</div>'),
+          catalog: Option.none(),
           actions: [{ type: "prompt", prompt: "Update both" }],
         });
 
@@ -258,12 +262,12 @@ describe("GenerateService", () => {
         const items = Chunk.toArray(results);
 
         expect(items.length).toBe(3); // 2 patches + stats
-        expect(items[0].type).toBe("patches");
-        expect(items[1].type).toBe("patches");
-        expect(items[2].type).toBe("stats");
+        expect(items[0].op).toBe("patches");
+        expect(items[1].op).toBe("patches");
+        expect(items[2].op).toBe("stats");
       }).pipe(Effect.provide(createTestLayer(createMockModel([
-        '{"type":"patches","patches":[{"selector":"#a","text":"A"}]}\n',
-        '{"type":"patches","patches":[{"selector":"#b","text":"B"}]}\n',
+        '{"op":"patches","patches":[{"selector":"#a","text":"A"}]}\n',
+        '{"op":"patches","patches":[{"selector":"#b","text":"B"}]}\n',
       ]))))
     );
   });
@@ -300,7 +304,7 @@ describe("GenerateService", () => {
               // Step 2: LLM emits patches
               return {
                 stream: makeStream([
-                  textDelta('{"type":"patches","patches":[{"selector":"#app","html":"<table><tr><td>ISS-1</td></tr></table>"}]}\n'),
+                  textDelta('{"op":"patches","patches":[{"selector":"#app","html":"<table><tr><td>ISS-1</td></tr></table>"}]}\n'),
                   finishStop,
                 ]),
                 rawCall: { rawPrompt: null, rawSettings: {} },
@@ -315,7 +319,8 @@ describe("GenerateService", () => {
           const service = yield* GenerateService;
           const stream = yield* service.streamUnified({
             sessionId: "test-session",
-            currentHtml: '<div id="app">loading...</div>',
+            currentHtml: Option.some('<div id="app">loading...</div>'),
+            catalog: Option.none(),
             actions: [{ type: "prompt", prompt: "Show my Linear issues" }],
           });
           return yield* Stream.runCollect(stream).pipe(Effect.map(Chunk.toArray));
@@ -325,8 +330,8 @@ describe("GenerateService", () => {
         expect(model.doStreamCalls.length).toBe(3);
 
         // Stream produced patches + stats
-        expect(items.some((i) => i.type === "patches")).toBe(true);
-        expect(items.some((i) => i.type === "stats")).toBe(true);
+        expect(items.some((i) => i.op === "patches")).toBe(true);
+        expect(items.some((i) => i.op === "stats")).toBe(true);
 
         // search_docs was called
         expect(callLog.some((c) => c.method === "search")).toBe(true);
@@ -362,7 +367,7 @@ describe("GenerateService", () => {
               // Step 2: LLM adapts with fallback UI
               return {
                 stream: makeStream([
-                  textDelta('{"type":"patches","patches":[{"selector":"#app","text":"Code execution is not available"}]}\n'),
+                  textDelta('{"op":"patches","patches":[{"selector":"#app","text":"Code execution is not available"}]}\n'),
                   finishStop,
                 ]),
                 rawCall: { rawPrompt: null, rawSettings: {} },
@@ -378,7 +383,8 @@ describe("GenerateService", () => {
           const service = yield* GenerateService;
           const stream = yield* service.streamUnified({
             sessionId: "test-session",
-            currentHtml: '<div id="app">loading...</div>',
+            currentHtml: Option.some('<div id="app">loading...</div>'),
+            catalog: Option.none(),
             actions: [{ type: "prompt", prompt: "Show my Linear issues" }],
           });
           return yield* Stream.runCollect(stream).pipe(Effect.map(Chunk.toArray));
@@ -388,8 +394,8 @@ describe("GenerateService", () => {
         expect(model.doStreamCalls.length).toBe(3);
 
         // Stream still completes with patches
-        expect(items.some((i) => i.type === "patches")).toBe(true);
-        expect(items.some((i) => i.type === "stats")).toBe(true);
+        expect(items.some((i) => i.op === "patches")).toBe(true);
+        expect(items.some((i) => i.op === "stats")).toBe(true);
       })
     );
   });

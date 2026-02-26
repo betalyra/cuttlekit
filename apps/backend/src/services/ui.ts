@@ -1,4 +1,4 @@
-import { Effect, Stream, Match, Ref, pipe } from "effect";
+import { Effect, Stream, Match, Ref, pipe, Option } from "effect";
 import { GenerateService, type UnifiedResponse } from "./generate/index.js";
 import { MemoryService, type MemoryChange } from "./memory/index.js";
 import { SessionService } from "./session.js";
@@ -29,27 +29,32 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
         );
         const sessionId = session.id;
 
-        // Use most recent action's currentHtml as fallback
-        const clientHtml = [...request.actions]
-          .reverse()
-          .find((a) => a.currentHtml)?.currentHtml;
-
-        // Get current VDOM HTML (null if new session)
-        // Fall back to client-provided HTML if server doesn't have VDOM (e.g., after restart)
+        // Server is the sole source of truth for VDOM state
         const serverHtml = yield* vdomService.getHtml(sessionId);
-        const currentHtml = serverHtml ?? clientHtml ?? null;
 
-        // If client provided HTML but server didn't have it, restore the VDOM
-        if (!serverHtml && currentHtml) {
-          yield* vdomService.setHtml(sessionId, currentHtml);
+        if (!serverHtml) {
+          // Server restart recovery — restore from DB snapshot
+          const snapshot = yield* sessionService.getSnapshot(sessionId);
+          if (Option.isSome(snapshot)) {
+            const { registry, html } = snapshot.value;
+            if (registry.length > 0) {
+              yield* vdomService.restoreRegistry(sessionId, registry);
+            }
+            if (html) {
+              yield* vdomService.setHtml(sessionId, html);
+              yield* vdomService.renderTree(sessionId);
+            }
+          }
         }
 
-        return { sessionId, currentHtml };
+        const currentHtml = yield* vdomService.getHtml(sessionId);
+        return { sessionId, currentHtml: Option.fromNullable(currentHtml) };
       });
 
     // Streaming event types
     type StreamEvent =
       | { type: "session"; sessionId: string }
+      | { type: "define"; tag: string; props: string[]; template: string }
       | { type: "patch"; patch: Patch }
       | { type: "html"; html: string }
       | {
@@ -67,7 +72,7 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
 
         yield* Effect.log("UIService.generateStream", {
           actionCount: request.actions.length,
-          hasCurrentHtml: !!currentHtml,
+          hasCurrentHtml: Option.isSome(currentHtml),
         });
 
         // Handle "reset" action - clear VDOM before generation
@@ -79,10 +84,18 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
           yield* Effect.log("Session reset, generating fresh UI");
         }
 
+        // Get component catalog for prompt
+        const catalog = isResetAction
+          ? Option.none<string>()
+          : Option.fromNullable(
+              yield* vdomService.getCatalog(sessionId),
+            );
+
         // Pass the full actions array to the generate service
         const unifiedStream = yield* generateService.streamUnified({
           sessionId,
-          currentHtml: isResetAction ? undefined : (currentHtml ?? undefined),
+          currentHtml: isResetAction ? Option.none() : currentHtml,
+          catalog,
           actions: request.actions,
           modelId: request.modelId,
           sandboxCtx: request.sandboxCtx,
@@ -98,7 +111,7 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
         const memoryChangeRef = yield* Ref.make<MemoryChange | null>(null);
 
         // Transform unified responses to stream events, applying to VDOM
-        let lastHtml = currentHtml || "";
+        let lastHtml = Option.getOrElse(currentHtml, () => "");
 
         const handlePatchResponse = (patches: Patch[]) =>
           Effect.gen(function* () {
@@ -133,20 +146,40 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
         ): Effect.Effect<StreamEvent[], never, never> =>
           Effect.gen(function* () {
             yield* vdomService.setHtml(sessionId, html);
+            // Render CEs so elements inside templates are available for subsequent patches
+            yield* vdomService.renderTree(sessionId);
             lastHtml = html;
             // Track full HTML for memory
             yield* Ref.set(memoryChangeRef, { type: "full", html });
             return [{ type: "html" as const, html } as StreamEvent];
           });
 
+        const handleDefineResponse = (r: {
+          tag: string;
+          props: string[];
+          template: string;
+        }) =>
+          Effect.gen(function* () {
+            yield* vdomService.define(sessionId, r);
+            return [
+              {
+                type: "define" as const,
+                tag: r.tag,
+                props: r.props,
+                template: r.template,
+              } as StreamEvent,
+            ];
+          });
+
         const handleResponse = (response: UnifiedResponse) =>
           pipe(
             Match.value(response),
-            Match.when({ type: "patches" }, (r) =>
+            Match.when({ op: "patches" }, (r) =>
               handlePatchResponse(r.patches),
             ),
-            Match.when({ type: "full" }, (r) => handleFullResponse(r.html)),
-            Match.when({ type: "stats" }, (r) =>
+            Match.when({ op: "full" }, (r) => handleFullResponse(r.html)),
+            Match.when({ op: "define" }, (r) => handleDefineResponse(r)),
+            Match.when({ op: "stats" }, (r) =>
               Effect.succeed([
                 {
                   type: "stats" as const,
@@ -165,11 +198,19 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
           Stream.flatMap((events) => Stream.fromIterable(events)),
         );
 
-        // End with done event - also saves memory
+        // End with done event - saves memory and persists snapshot
         const doneEvent = Stream.fromEffect(
           Effect.gen(function* () {
             const finalHtml = yield* vdomService.getHtml(sessionId);
             lastHtml = finalHtml || lastHtml;
+
+            const registry = yield* vdomService.getRegistry(sessionId);
+
+            // Persist snapshot for server-restart recovery
+            yield* sessionService.saveSnapshot(sessionId, {
+              html: lastHtml,
+              registry: [...registry.values()],
+            });
 
             // Save memory asynchronously (non-blocking via queue)
             const memoryChange = yield* Ref.get(memoryChangeRef);

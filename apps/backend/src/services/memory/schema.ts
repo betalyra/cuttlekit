@@ -37,6 +37,10 @@ export const sessions = sqliteTable("sessions", {
 
   name: text("name"), // Optional user-given name, e.g., "Landing Page"
 
+  // Snapshot for server-restart recovery (VDOM HTML + component registry)
+  // Validated via Effect Schema in StoreService — not trusted at this layer
+  snapshot: text("snapshot", { mode: "json" }),
+
   createdAt: integer("created_at").notNull(),
   lastAccessedAt: integer("last_accessed_at").notNull(),
 });

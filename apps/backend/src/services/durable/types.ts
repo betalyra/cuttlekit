@@ -8,6 +8,7 @@ export {
   ActionSchema,
   type Action,
   SessionEventSchema,
+  DefineEventSchema,
   PatchEventSchema,
   HtmlEventSchema,
   StatsEventSchema,
@@ -27,7 +28,6 @@ export const ActionPayloadSchema = Schema.Struct({
   actionData: Schema.optional(
     Schema.Record({ key: Schema.String, value: Schema.Unknown }),
   ),
-  currentHtml: Schema.optional(Schema.String),
   model: Schema.optional(Schema.String),
 });
 

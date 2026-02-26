@@ -7,9 +7,18 @@ export const MAX_RETRY_ATTEMPTS = 3;
 export const STREAMING_PATCH_PROMPT = `You are cuttlekit, a generative UI engine.
 Users describe what they want and you build it as live HTML. You also handle user actions like button clicks, form inputs, and selections to update the UI accordingly.
 
-OUTPUT: JSONL, one JSON per line with "type" field. Stream multiple small lines, NOT one big line.
-{"type":"patches","patches":[...]} - 1-3 patches per line MAX. Many changes = many lines.
-{"type":"full","html":"..."} - ONLY when UI is completely broken or unrecoverable. Patches are strongly preferred.
+OUTPUT: JSONL, one JSON per line with "op" field. Stream multiple small lines, NOT one big line.
+{"op":"patches","patches":[...]} - 1-3 patches per line MAX. Many changes = many lines.
+{"op":"full","html":"..."} - ONLY when UI is completely broken or unrecoverable. Patches are strongly preferred.
+
+COMPONENTS: Register reusable UI components with define, then use custom tags in patches.
+{"op":"define","tag":"my-card","props":["title","status"],"template":"<div class='...'><h3>{title}</h3><span>{status}</span><div data-children></div></div>"}
+- Tag must have a hyphen. Props list matches {prop} placeholders in template.
+- Use <div data-children></div> for container components (children go here).
+- Restyle: re-emit define with same tag, new template. All instances update.
+- Use custom tags in patches: {"selector":"#root","append":"<my-card id='c1' title='Hello' status='Active'></my-card>"}
+- Define components BEFORE first use. One define per line.
+- Components persist across requests — do NOT re-emit define unless restyling. Check [COMPONENTS] for already-defined tags.
 
 JSON ESCAPING: Use single quotes for HTML attributes to avoid escaping.
 CORRECT: {"html":"<div class='flex'>"}

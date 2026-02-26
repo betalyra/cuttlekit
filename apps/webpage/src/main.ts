@@ -9,6 +9,43 @@ const MODEL_STORAGE_KEY = "generative-ui-model";
 
 type StreamEvent = StreamEventWithOffset;
 
+// ============================================================
+// Client-side component registry + CE rendering
+// ============================================================
+
+type ClientComponentSpec = {
+  tag: string;
+  props: string[];
+  template: string;
+  version: number;
+};
+
+const registry = new Map<string, ClientComponentSpec>();
+
+const interpolate = (template: string, props: string[], el: Element) =>
+  props.reduce(
+    (acc, prop) => acc.replaceAll(`{${prop}}`, el.getAttribute(prop) ?? ""),
+    template,
+  );
+
+const renderElement = (el: Element) => {
+  const spec = registry.get(el.tagName.toLowerCase());
+  if (!spec) return;
+  const existing = el.querySelector("[data-children]");
+  const children = [...(existing ?? el).children];
+  el.innerHTML = interpolate(spec.template, spec.props, el);
+  const container = el.querySelector("[data-children]");
+  if (container) children.forEach((c) => container.appendChild(c));
+};
+
+const renderTree = (root: Element) => {
+  if (registry.size === 0) return;
+  const tags = [...registry.keys()];
+  [...root.querySelectorAll("*")]
+    .filter((el) => tags.includes(el.tagName.toLowerCase()))
+    .forEach(renderElement);
+};
+
 type StreamState = {
   sessionId: string;
   lastOffset: number;
@@ -161,11 +198,31 @@ const app = {
           );
         }
         break;
-      case "patch":
-        this.applyPatch(event.patch as Patch);
+      case "define": {
+        const existing = registry.get(event.tag);
+        registry.set(event.tag, {
+          tag: event.tag,
+          props: [...(event.props as string[])],
+          template: event.template as string,
+          version: existing ? existing.version + 1 : 1,
+        });
+        // Re-render existing instances
+        const { contentEl } = this.getElements();
+        contentEl.querySelectorAll(event.tag).forEach(renderElement);
         break;
+      }
+      case "patch": {
+        const patch = event.patch as Patch;
+        this.applyPatch(patch);
+        // Render CEs after structural mutations
+        if ("append" in patch || "prepend" in patch || "html" in patch) {
+          renderTree(this.getElements().contentEl);
+        }
+        break;
+      }
       case "html":
         this.getElements().contentEl.innerHTML = event.html;
+        renderTree(this.getElements().contentEl);
         loadFontsFromHTML(event.html);
         loadIconsFromHTML(event.html);
         break;
@@ -209,6 +266,7 @@ const app = {
 
     for (const eventType of [
       "session",
+      "define",
       "patch",
       "html",
       "stats",
@@ -231,12 +289,9 @@ const app = {
     prompt?: string;
     action?: string;
     actionData?: Record<string, unknown>;
-    currentHtml?: string;
   }) {
     this.setLoading(true);
     this.setError(null);
-
-    const currentHtml = this.getElements().contentEl.innerHTML || undefined;
 
     try {
       await fetch(`${API_BASE}/stream/${this.sessionId}`, {
@@ -244,8 +299,6 @@ const app = {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...request,
-          currentHtml:
-            currentHtml && currentHtml.trim() ? currentHtml : undefined,
           model: this.selectedModel ?? undefined,
         }),
       });
@@ -374,7 +427,8 @@ const app = {
     const saved = loadStreamState();
     if (saved) {
       this.sessionId = saved.sessionId;
-      this.lastOffset = saved.lastOffset;
+      // Always request bootstrap on page refresh — server sends registry + HTML
+      this.lastOffset = -1;
       this.setLoading(true);
     } else {
       try {

@@ -1,5 +1,5 @@
 import { DateTime, Effect } from "effect";
-import { StoreService } from "./memory/index.js";
+import { StoreService, type SessionSnapshot } from "./memory/index.js";
 
 const DEFAULT_USER_ID = "default-user";
 
@@ -48,6 +48,12 @@ export class SessionService extends Effect.Service<SessionService>()(
       const deleteSession = (sessionId: string) =>
         store.deleteSession(sessionId);
 
+      const saveSnapshot = (sessionId: string, snapshot: SessionSnapshot) =>
+        store.saveSnapshot(sessionId, snapshot);
+
+      const getSnapshot = (sessionId: string) =>
+        store.getSnapshot(sessionId);
+
       return {
         createSession,
         getSession,
@@ -55,6 +61,8 @@ export class SessionService extends Effect.Service<SessionService>()(
         listSessions,
         renameSession,
         deleteSession,
+        saveSnapshot,
+        getSnapshot,
       };
     }),
   }

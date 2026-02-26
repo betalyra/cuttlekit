@@ -16,7 +16,6 @@ export const ActionSchema = Schema.Struct({
   actionData: Schema.optional(
     Schema.Record({ key: Schema.String, value: Schema.Unknown }),
   ),
-  currentHtml: Schema.optional(Schema.String),
   model: Schema.optional(Schema.String),
 });
 
@@ -29,6 +28,13 @@ export type Action = typeof ActionSchema.Type;
 export const SessionEventSchema = Schema.Struct({
   type: Schema.Literal("session"),
   sessionId: Schema.String,
+});
+
+export const DefineEventSchema = Schema.Struct({
+  type: Schema.Literal("define"),
+  tag: Schema.String,
+  props: Schema.Array(Schema.String),
+  template: Schema.String,
 });
 
 export const PatchEventSchema = Schema.Struct({
@@ -56,6 +62,7 @@ export const DoneEventSchema = Schema.Struct({
 
 export const StreamEventSchema = Schema.Union(
   SessionEventSchema,
+  DefineEventSchema,
   PatchEventSchema,
   HtmlEventSchema,
   StatsEventSchema,
@@ -73,6 +80,9 @@ export type StreamEventWithOffset = StreamEvent & {
 // ============================================================
 
 export type SessionEvent = typeof SessionEventSchema.Type & {
+  offset: number;
+};
+export type DefineStreamEvent = typeof DefineEventSchema.Type & {
   offset: number;
 };
 export type PatchStreamEvent = typeof PatchEventSchema.Type & {

@@ -326,26 +326,212 @@ The existing patch pipeline stays unchanged. CEs are layered on top.
 
 ---
 
-## What changes where
+## Integration: Persistence & Prompt Caching
+
+### Architecture: backend is source of truth
+
+The backend owns all session state. The client never sends HTML to the server — it always restores from the backend.
+
+| Layer | In-memory | DB | Recovery |
+|-------|-----------|-----|----------|
+| **VDOM** | `Map<sessionId, Window>` in VdomService | `sessions.snapshot_html` | Restore from DB snapshot on server restart |
+| **Registry** | `Map<sessionId, Registry>` in ComponentRegistryService | `sessions.snapshot_registry` | Restore from DB snapshot on server restart |
+| **Events** | PubSub (live subscribers) | `streamEvents` table (offset-ordered) | Replay from DB on client reconnect |
+| **Memory** | — | `sessionMemoryEntries` (summaries + embeddings) | Already persisted |
+
+### In-memory state
+
+Registry is integrated into VdomService (not a separate service):
+
+```
+VdomService:
+  windowsRef: Map<sessionId, Window>
+  registriesRef: Map<sessionId, Map<tag, ComponentSpec>>
+```
+
+When a `define` op arrives:
+1. Update in-memory registry (version bump if tag exists)
+2. Register CE thin shell in happy-dom Window (skip if already registered)
+3. Re-render existing instances (`querySelectorAll(tag).forEach(el => el.render())`)
+4. Emit `define` event through the durable stream
+
+### Persistence: DB snapshots
+
+After each generation completes (in the `done` event), snapshot the current state to the `sessions` table:
+- `snapshot_html` — current `body.innerHTML` from happy-dom
+- `snapshot_registry` — JSON array of `ComponentSpec[]`
+
+This is cheap (one UPDATE per generation) and provides instant recovery on server restart without scanning event history.
+
+`define` ops also flow through the existing stream event pipeline as event type `"define"` — this is how the client receives them in real-time and on reconnect replay.
+
+### Recovery scenarios
+
+**Client reconnect (server still running):**
+1. Client connects with `?offset=N`
+2. Server replays missed events from DB (including `define` ops)
+3. Client processes events in order: `define` → register CE, `patch` → apply
+4. Result: identical state
+
+**Page refresh (new tab, F5):**
+1. Client has `sessionId` in localStorage but no DOM
+2. Connects SSE with `offset=-1` (requests full bootstrap)
+3. Server sends current registry as `define` events + current HTML as `html` event
+4. Client registers CEs, sets innerHTML, renders tree
+5. Then receives live events going forward
+
+**Server restart:**
+1. Client's EventSource auto-reconnects
+2. Server lazily restores session: load `snapshot_html` and `snapshot_registry` from DB
+3. Restore registry → register CEs in fresh happy-dom Window
+4. Restore VDOM HTML → set `body.innerHTML`
+5. Run `renderTree` to upgrade CE tags
+6. Ready for next generation
+
+**Cold start (both restart):**
+1. Client loads, has no session state
+2. Server creates fresh session
+3. Clean slate
+
+### Prompt structure with registry
+
+Current prompt (no registry):
+```
+System: instructions                              → cached (prefix)
+User:   HTML:\n{raw HTML}                         → changes every interaction
+        [RECENT CHANGES]\n...
+        [NOW]\n...actions
+```
+
+With registry — component catalog goes early, page state goes late:
+```
+System: instructions + define op format            → cached (prefix)
+User:   [COMPONENTS]                               → rarely changes → cache extends here
+        <project-card name:string status:string>
+        <task-item title:string done:string>
+
+        [PAGE STATE]                               → changes, but much smaller now
+        <div id="root">
+          <project-card id="p1" name="Alpha" status="Active">
+            <task-item id="t1" title="Design" done="☑"/>
+          </project-card>
+        </div>
+
+        [RECENT CHANGES]\n...
+        [NOW]\n...actions
+```
+
+**Why this ordering matters for caching:**
+- Anthropic's prompt caching works on prefix matching
+- `[COMPONENTS]` is placed right after system instructions
+- Registry only changes on `define`/restyle (rare — maybe once per session)
+- Everything before `[PAGE STATE]` stays prefix-identical between interactions → cache hit
+- The cache boundary naturally extends through the entire component catalog
+
+**How compact is the page state now?**
+
+Before (raw HTML):
+```html
+<div id="p1" class="group flex items-center justify-between p-4 border-4
+  border-[#0a0a0a] bg-white shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]
+  hover:shadow-[12px_12px_0px_0px_rgba(0,0,0,1)] transition-shadow"
+  style="font-family: 'Space Grotesk'">
+  <div class="flex flex-col gap-1">
+    <span class="font-bold text-sm">CK-10</span>
+    <span class="text-sm">Wash grapes</span>
+  </div>
+  <span class="text-xs font-bold px-2 py-1 rounded"
+    style="background: #bec2c8; color: #fff">Backlog</span>
+</div>
+```
+~150 tokens per item.
+
+After (CE tags):
+```html
+<project-card id="p1" name="Alpha" status="Active">
+  <task-item id="t1" title="Wash grapes" done="false"/>
+</project-card>
+```
+~25 tokens per item. **~6x reduction in page state size.**
+
+The template HTML (Tailwind classes, inline styles) lives in the registry, which is cached and never re-sent. Only the data (IDs + prop values) appears in the volatile page state section.
+
+### Page state serialization
+
+Serialize `document.body.innerHTML` as today. With CEs it's naturally compact — the LLM sees the same tree structure it writes:
+```html
+<project-card id="p1" name="Alpha" status="Active">
+  <task-item id="t1" title="Design" done="☑"></task-item>
+</project-card>
+```
+
+The LLM needs the actual DOM tree to target selectors accurately. The ~6x token reduction from CE tags is sufficient for now. Further compression (e.g. flat element maps) can be explored later.
+
+### Registry projection in prompt
+
+The component catalog shown to the LLM should be compact — just the interface, not the full template:
+
+```
+[COMPONENTS]
+<project-card name:string status:string> — container with [data-children]
+<task-item title:string done:string> — leaf
+<metric-card label:string value:string trend:string> — leaf
+```
+
+The LLM doesn't need to see template HTML to use components. It knows the tag name, props, and whether it's a container. This keeps the cached section small and stable.
+
+When the LLM wants to restyle, it emits a new `define` with the full template. But it doesn't need the old template in the prompt to do this — it can see the rendered output in `[PAGE STATE]` and decide what to change.
+
+### Event ordering and replay
+
+Stream events are offset-ordered. The natural generation order guarantees correctness:
+
+```
+offset 1: define  project-card  {tag, props, template}
+offset 2: define  task-item     {tag, props, template}
+offset 3: patch   {selector:"#root", append:"<project-card...>"}
+offset 4: patch   {selector:"#t1", attr:{done:"☑"}}
+...
+offset N: define  task-item     {tag, props, template}  ← restyle
+```
+
+On replay, `define` ops re-register CEs before patches apply them. A restyle `define` at offset N overwrites the earlier definition — later replayed patches see the restyled template. This is correct because the HTML in later patch events was generated against the restyled registry.
+
+### Memory integration
+
+The existing memory system stores summaries per generation. No changes needed — `define` ops are just another thing that happened during a generation. The change summary might say "Defined project-card and task-item components, rendered a board with 2 projects."
+
+One potential enhancement: store the component catalog as part of memory context, so when the user returns to a session after a long break, the LLM knows what components were previously defined without scanning events. But this is optimization, not essential.
+
+---
+
+## What changed (implemented)
 
 | Component | Change |
 |-----------|--------|
-| **System prompt** | Add `define` op format, teach LLM to use custom tags in existing patches |
-| **New: ComponentRegistry service** | Session-scoped `Map<string, ComponentSpec>`, CE class generation |
-| **New: ComponentValidator** | Static spec checks + live render test in happy-dom |
-| **service.ts** | Parse `define` ops, route to registry. Existing patch parsing unchanged |
-| **vdom.ts** | Register CEs from registry, `renderTree` after structural mutations |
-| **Client (main.ts)** | Register CEs from `define` ops, mirror `renderTree` logic |
-| **common/** | New: `ComponentSpec` type, `DefineOp` schema. Existing `Patch` type unchanged |
+| **`packages/common/src/stream.ts`** | Added `DefineEventSchema` + `DefineStreamEvent`, removed `currentHtml` from `ActionSchema` |
+| **`services/generate/types.ts`** | Added `DefineOpSchema`, all discriminants use `op` (not `type`), `Option<string>` for `currentHtml`/`catalog` |
+| **`services/vdom/vdom.ts`** | Registry integrated into VdomService (not a separate service). New methods: `define`, `getRegistry`, `getCatalog`, `restoreRegistry`, `renderTree`. CE shell classes, `renderTree` after structural patches |
+| **`services/generate/service.ts`** | `LLMResponseSchema` union handles `define` ops. `[COMPONENTS]` + `[PAGE STATE]` in user message with explicit empty state messages |
+| **`services/generate/prompts.ts`** | Added `COMPONENTS` section to system prompt with `define` op format |
+| **`services/ui.ts`** | `resolveSession` restores from DB snapshot (no client HTML fallback). `handleDefineResponse` routes define ops. Snapshot persisted in `doneEvent` |
+| **`services/memory/schema.ts`** | `snapshot` JSON column on `sessions` table |
+| **`services/memory/store.ts`** | `SessionSnapshotSchema` (Effect Schema) with `saveSnapshot`/`getSnapshot` returning `Option<SessionSnapshot>` |
+| **`api.ts`** | SSE bootstrap: `offset=-1` sends registry as `define` events + current HTML. Removed `currentHtml` from action submission |
+| **`apps/webpage/src/main.ts`** | Client-side CE registry, `interpolate`, `renderElement`, `renderTree`. Handles `define` events, renders CEs after structural patches. Removed `currentHtml` from `submitAction` |
+
+### Key implementation decisions
+
+- **No separate ComponentRegistry service** — registry lives inside VdomService since it's tightly coupled to the happy-dom Window lifecycle
+- **No ComponentValidator** — static validation deferred; Zod schema validates structure, happy-dom validates rendering
+- **Effect Schema for DB snapshots** — validates on read with `Schema.decodeUnknown`, falls back to `Option.none()` on parse failure
+- **`op` discriminant everywhere** — all LLM response types use `op` instead of `type` for consistency
 
 ### Dependencies
 
-None. Simple `{prop}` interpolation replaces Mustache. Direct patch application replaces idiomorph.
+None. Simple `{prop}` interpolation. Direct patch application.
 
 ### Open questions
 
 1. **Conditional rendering** — templates may need a way to toggle classes or show/hide content based on prop values (e.g. strikethrough when `done="true"`). Could be solved with CSS attribute selectors (`[done="true"] span { text-decoration: line-through }`) rather than template logic.
-
-2. **Template size** — large templates defeat the purpose. Guide the LLM to split into smaller, composable CEs.
-
-3. **Nesting depth validation** — `[data-children]` composes naturally but validation must detect unreasonable nesting depth.
+2. **Static validation** — tag name rules, template sanitization (no script/iframe/onclick), placeholder validation. Not yet implemented — deferred to first real-world usage to avoid premature constraints.
