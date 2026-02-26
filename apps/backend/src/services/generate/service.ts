@@ -21,7 +21,6 @@ import {
   buildSystemPrompt,
   buildCorrectivePrompt,
   safeAsyncIterable,
-  PromptLogger,
 } from "./index.js";
 import type { GenerationError } from "./errors.js";
 import { ToolService, TOOL_STEP_LIMIT, type SandboxTools } from "./tools.js";
@@ -36,7 +35,6 @@ export class GenerateService extends Effect.Service<GenerateService>()(
       const modelRegistry = yield* ModelRegistry;
       const memory = yield* MemoryService;
       const patchValidator = yield* PatchValidator;
-      const promptLogger = yield* PromptLogger;
       const toolService = yield* ToolService;
 
       // ============================================================
@@ -477,8 +475,13 @@ export class GenerateService extends Effect.Service<GenerateService>()(
             { role: "user", content: userContent },
           ];
 
-          // Log prompt to file if enabled
-          yield* promptLogger.logMessages(messages);
+          // Log full prompt at debug level
+          yield* Effect.logDebug("Full prompt");
+          yield* Effect.logDebug(
+            messages
+              .map((m) => `## ${m.role.toUpperCase()}\n\n${m.content}`)
+              .join("\n\n---\n\n"),
+          );
 
           // Create CE-aware validation context from current HTML (or empty)
           const validationCtx = yield* patchValidator.createValidationContext(

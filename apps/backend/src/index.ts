@@ -1,10 +1,10 @@
 import { HttpApiBuilder, HttpMiddleware, HttpServer } from "@effect/platform";
-import { NodeHttpServer, NodeRuntime, NodeFileSystem, NodePath } from "@effect/platform-node";
+import { NodeHttpServer, NodeRuntime, NodeFileSystem } from "@effect/platform-node";
 import { Config, Effect, Layer, Logger, LogLevel } from "effect";
 import { createServer } from "node:http";
 
 import { api, healthGroupLive, sessionsGroupLive, streamGroupLive, modelsGroupLive } from "./api.js";
-import { GenerateService, PromptLogger } from "./services/generate/index.js";
+import { GenerateService } from "./services/generate/index.js";
 import {
   GroqLanguageModelLayer,
   GoogleLanguageModelLayer,
@@ -70,12 +70,6 @@ const MemoryWithDeps = MemoryService.Default.pipe(
 // Session service depends on store
 const SessionWithDeps = SessionService.Default.pipe(Layer.provide(StoreWithDb));
 
-// Prompt logger depends on FileSystem and Path
-const PromptLoggerWithDeps = PromptLogger.Default.pipe(
-  Layer.provide(NodeFileSystem.layer),
-  Layer.provide(NodePath.layer),
-);
-
 // Model registry depends on FileSystem (reads config.toml)
 const ModelRegistryLive = ModelRegistry.Default.pipe(
   Layer.provide(NodeFileSystem.layer),
@@ -107,7 +101,6 @@ const GenerateWithDeps = GenerateService.Default.pipe(
   Layer.provide(LlmLayerLive),
   Layer.provide(ModelRegistryLive),
   Layer.provide(PatchValidator.Default),
-  Layer.provide(PromptLoggerWithDeps),
   Layer.provide(ToolServiceWithDeps),
 );
 
