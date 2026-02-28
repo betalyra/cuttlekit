@@ -1,4 +1,6 @@
-# cuttlekit
+<p align="center">
+  <img src="assets/logo-text.svg" alt="cuttlekit" width="500" />
+</p>
 
 cuttlekit is a generative UI toolkit that generates interactive UIs on the fly using LLMs.
 
