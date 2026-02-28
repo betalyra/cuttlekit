@@ -18,3 +18,12 @@ dist
 
 # AI instructions
 plans/
+other-docs/
+
+config.toml
+.env
+.env.dev
+.env.local
+
+# AI code assistants
+.claude/
