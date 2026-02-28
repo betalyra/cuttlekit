@@ -1,6 +1,7 @@
 import { Effect, pipe, Array as Arr, Redacted, Schema } from "effect";
 import { createGroq } from "@ai-sdk/groq";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { LanguageModel } from "ai";
 import type { ProviderOptions } from "@ai-sdk/provider-utils";
 import {
@@ -8,6 +9,7 @@ import {
   type UsageExtractor,
   extractGroqUsage,
   extractGoogleUsage,
+  extractDefaultUsage,
 } from "@betalyra/generative-ui-common/server";
 import { loadAppConfig, type ProviderConfig } from "./app-config.js";
 
@@ -54,6 +56,18 @@ const providerFactories: Record<string, ProviderFactory> = {
       return (modelId: string) => g(modelId);
     },
     extractUsage: extractGoogleUsage,
+  },
+  inception: {
+    create: (apiKey) => {
+      const provider = createOpenAICompatible({
+        name: "inception",
+        baseURL: "https://api.inceptionlabs.ai/v1",
+        apiKey,
+        includeUsage: true,
+      });
+      return (modelId: string) => provider.chatModel(modelId);
+    },
+    extractUsage: extractDefaultUsage,
   },
 };
 

@@ -24,6 +24,15 @@ thinkingConfig = { thinkingLevel = "minimal" }
 id = "gemini-3-flash-preview"
 label = "Gemini 3 Flash"
 
+[providers.inception]
+
+[providers.inception.options]
+openaiCompatible = { reasoningEffort = "instant" }
+
+[[providers.inception.models]]
+id = "mercury-2"
+label = "Mercury 2"
+
 # --- Sandbox ---
 
 [sandbox]

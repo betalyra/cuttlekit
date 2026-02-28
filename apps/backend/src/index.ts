@@ -9,6 +9,7 @@ import {
   GroqLanguageModelLayer,
   GoogleLanguageModelLayer,
   GoogleEmbeddingModelLayer,
+  InceptionLanguageModelLayer,
 } from "@betalyra/generative-ui-common/server";
 import { SessionService } from "./services/session.js";
 import {
@@ -36,6 +37,7 @@ const LlmLayerLive = Layer.unwrapEffect(
     const selectedProvider = yield* Config.literal(
       "google",
       "groq",
+      "inception",
     )("LLM_PROVIDER").pipe(Config.withDefault("groq"));
 
     const modelId = yield* Config.string("LLM_MODEL").pipe(
@@ -45,6 +47,8 @@ const LlmLayerLive = Layer.unwrapEffect(
     yield* Effect.logInfo(`Using ${selectedProvider} model ${modelId}`);
     if (selectedProvider === "groq") {
       return GroqLanguageModelLayer(modelId);
+    } else if (selectedProvider === "inception") {
+      return InceptionLanguageModelLayer(modelId);
     } else {
       return GoogleLanguageModelLayer(modelId);
     }
