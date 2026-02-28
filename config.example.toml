@@ -28,6 +28,16 @@ thinkingConfig = { thinkingLevel = "minimal" }
 id = "gemini-3-flash-preview"
 label = "Gemini 3 Flash"
 
+[providers.inception]
+
+[providers.inception.options]
+# "instant" enables near-instant responses (ideal for real-time UIs)
+openaiCompatible = { reasoningEffort = "instant" }
+
+[[providers.inception.models]]
+id = "mercury-2"
+label = "Mercury 2"
+
 # --- Sandbox (optional) ---
 # Enables server-side code execution for LLM-generated code.
 # Remove this section entirely to disable sandboxing.
