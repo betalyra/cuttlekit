@@ -1,15 +1,13 @@
 import { HttpApiBuilder, HttpMiddleware, HttpServer } from "@effect/platform";
 import { NodeHttpServer, NodeRuntime, NodeFileSystem } from "@effect/platform-node";
-import { Config, Effect, Layer, Logger, LogLevel } from "effect";
+import { Effect, Layer, Logger, LogLevel } from "effect";
 import { createServer } from "node:http";
 
 import { api, healthGroupLive, sessionsGroupLive, streamGroupLive, modelsGroupLive } from "./api.js";
 import { GenerateService } from "./services/generate/index.js";
 import {
-  GroqLanguageModelLayer,
-  GoogleLanguageModelLayer,
   GoogleEmbeddingModelLayer,
-  InceptionLanguageModelLayer,
+  LanguageModelProvider,
 } from "@betalyra/generative-ui-common/server";
 import { SessionService } from "./services/session.js";
 import {
@@ -30,31 +28,6 @@ import { SandboxService } from "./services/sandbox/index.js";
 import { ChunkingService, DocSearchService } from "./services/doc-search/index.js";
 import { ToolService } from "./services/generate/tools.js";
 
-// LLM provider layer based on LLM_PROVIDER env var (groq | google)
-// Dies on config error - no point running without a model
-const LlmLayerLive = Layer.unwrapEffect(
-  Effect.gen(function* () {
-    const selectedProvider = yield* Config.literal(
-      "google",
-      "groq",
-      "inception",
-    )("LLM_PROVIDER").pipe(Config.withDefault("groq"));
-
-    const modelId = yield* Config.string("LLM_MODEL").pipe(
-      Config.withDefault("openai/gpt-oss-120b"),
-    );
-
-    yield* Effect.logInfo(`Using ${selectedProvider} model ${modelId}`);
-    if (selectedProvider === "groq") {
-      return GroqLanguageModelLayer(modelId);
-    } else if (selectedProvider === "inception") {
-      return InceptionLanguageModelLayer(modelId);
-    } else {
-      return GoogleLanguageModelLayer(modelId);
-    }
-  }).pipe(Effect.orDie),
-);
-
 // Embedding model layer (Google text-embedding-004)
 const EmbeddingLayerLive = GoogleEmbeddingModelLayer();
 
@@ -64,19 +37,28 @@ const EmbeddingLayerLive = GoogleEmbeddingModelLayer();
 // Database and store
 const StoreWithDb = StoreService.Default.pipe(Layer.provide(DatabaseLayer));
 
-// Memory service with store and embedding
-const MemoryWithDeps = MemoryService.Default.pipe(
-  Layer.provide(StoreWithDb),
-  Layer.provide(EmbeddingLayerLive),
-  Layer.provide(LlmLayerLive),
-);
-
 // Session service depends on store
 const SessionWithDeps = SessionService.Default.pipe(Layer.provide(StoreWithDb));
 
 // Model registry depends on FileSystem (reads config.toml)
 const ModelRegistryLive = ModelRegistry.Default.pipe(
   Layer.provide(NodeFileSystem.layer),
+);
+
+// Background model layer — resolves background_model from config via ModelRegistry
+const BackgroundModelLayer = Layer.effect(
+  LanguageModelProvider,
+  Effect.gen(function* () {
+    const registry = yield* ModelRegistry;
+    return yield* registry.resolveBackground;
+  }),
+).pipe(Layer.provide(ModelRegistryLive));
+
+// Memory service with store, embedding, and background model
+const MemoryWithDeps = MemoryService.Default.pipe(
+  Layer.provide(StoreWithDb),
+  Layer.provide(EmbeddingLayerLive),
+  Layer.provide(BackgroundModelLayer),
 );
 
 // Sandbox service depends on FileSystem (reads config.toml)
@@ -99,10 +81,9 @@ const ToolServiceWithDeps = ToolService.Default.pipe(
   Layer.provide(SandboxWithDeps),
 );
 
-// Generate service depends on memory, LLM, model registry, prompt logger, and tools
+// Generate service depends on memory, model registry, and tools
 const GenerateWithDeps = GenerateService.Default.pipe(
   Layer.provide(MemoryWithDeps),
-  Layer.provide(LlmLayerLive),
   Layer.provide(ModelRegistryLive),
   Layer.provide(PatchValidator.Default),
   Layer.provide(ToolServiceWithDeps),

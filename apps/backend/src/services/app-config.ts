@@ -57,6 +57,7 @@ const SandboxDefSchema = Schema.Struct({
 
 const TomlSchema = Schema.Struct({
   default_model: Schema.String,
+  background_model: Schema.optional(Schema.String),
   providers: Schema.Record({
     key: Schema.String,
     value: ProviderDefSchema,
@@ -80,6 +81,7 @@ export type ProviderConfig = {
 
 export type ModelsConfig = {
   readonly defaultModelId: string;
+  readonly backgroundModelId: string;
   readonly providers: ReadonlyArray<ProviderConfig>;
 };
 
@@ -201,7 +203,9 @@ export const loadAppConfig = Effect.gen(function* () {
     ),
   );
 
-  const models: ModelsConfig = { defaultModelId, providers };
+  const backgroundModelId = toml.background_model ?? defaultModelId;
+
+  const models: ModelsConfig = { defaultModelId, backgroundModelId, providers };
 
   // Resolve sandbox config (optional — absent section = no sandbox)
   const sandbox = toml.sandbox
@@ -212,6 +216,7 @@ export const loadAppConfig = Effect.gen(function* () {
     providers: providers.map((p) => p.name),
     models: providers.flatMap((p) => p.models.map((m) => m.id)),
     default: defaultModelId,
+    background: backgroundModelId,
     sandbox: Option.match(sandbox, {
       onNone: () => "none",
       onSome: (s) => ({

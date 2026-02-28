@@ -137,21 +137,25 @@ export class ModelRegistry extends Effect.Service<ModelRegistry>()(
         return Effect.succeed(entry.config);
       };
 
-      const availableModels = () =>
-        pipe(
-          entries,
-          Arr.map(({ id, provider, label }) => ({ id, provider, label })),
-        );
+      const resolveBackground = resolve(config.backgroundModelId);
+
+      const availableModels = pipe(
+        entries,
+        Arr.map(({ id, provider, label }) => ({ id, provider, label })),
+      );
 
       yield* Effect.log("Model registry initialized", {
         models: entries.map((e) => `${e.provider}/${e.id}`),
         default: config.defaultModelId,
+        background: config.backgroundModelId,
       });
 
       return {
         resolve,
+        resolveBackground,
         availableModels,
         defaultModelId: config.defaultModelId,
+        backgroundModelId: config.backgroundModelId,
       };
     }),
   },

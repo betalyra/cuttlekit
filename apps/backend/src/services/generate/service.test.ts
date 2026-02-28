@@ -4,7 +4,7 @@ import { MockLanguageModelV3 } from "ai/test";
 import { simulateReadableStream } from "ai";
 import type { LanguageModelV3StreamPart } from "@ai-sdk/provider";
 import { GenerateService } from "./service.js";
-import { TestLanguageModelLayer } from "@betalyra/generative-ui-common/server";
+import { extractDefaultUsage } from "@betalyra/generative-ui-common/server";
 import { PatchValidator } from "../vdom/index.js";
 import { MemoryService } from "../memory/index.js";
 import { ModelRegistry } from "../model-registry.js";
@@ -79,11 +79,25 @@ const MockMemoryLayer = Layer.succeed(MemoryService, {
   describePatches: () => "",
 } as unknown as MemoryService);
 
-const MockModelRegistryLayer = Layer.succeed(ModelRegistry, {
-  resolve: () => Effect.fail(new Error("not configured")),
-  availableModels: () => [],
-  defaultModelId: "test",
-} as unknown as ModelRegistry);
+const createMockRegistryLayer = (mockModel: MockLanguageModelV3) =>
+  Layer.succeed(ModelRegistry, {
+    resolve: () =>
+      Effect.succeed({
+        model: mockModel,
+        providerOptions: {},
+        extractUsage: extractDefaultUsage,
+        providerName: "test",
+      }),
+    resolveBackground: Effect.succeed({
+      model: mockModel,
+      providerOptions: {},
+      extractUsage: extractDefaultUsage,
+      providerName: "test",
+    }),
+    availableModels: [],
+    defaultModelId: "test",
+    backgroundModelId: "test",
+  } as unknown as ModelRegistry);
 
 // ============================================================
 // Mock ToolService (no tools — for text-only tests)
@@ -101,10 +115,9 @@ const MockToolServiceLayer = Layer.succeed(ToolService, {
 
 const createTestLayer = (mockModel: ReturnType<typeof createMockModel>) =>
   GenerateService.Default.pipe(
-    Layer.provide(TestLanguageModelLayer(mockModel)),
     Layer.provide(MockMemoryLayer),
     Layer.provide(PatchValidator.Default),
-    Layer.provide(MockModelRegistryLayer),
+    Layer.provide(createMockRegistryLayer(mockModel)),
     Layer.provide(MockToolServiceLayer),
   );
 
@@ -177,10 +190,9 @@ const createToolTestLayer = (
   manager: SandboxManagerInstance | null,
 ) =>
   GenerateService.Default.pipe(
-    Layer.provide(TestLanguageModelLayer(mockModel)),
     Layer.provide(MockMemoryLayer),
     Layer.provide(PatchValidator.Default),
-    Layer.provide(MockModelRegistryLayer),
+    Layer.provide(createMockRegistryLayer(mockModel)),
     Layer.provide(
       ToolService.Default.pipe(
         Layer.provide(makeMockDocSearchLayer(callLog)),

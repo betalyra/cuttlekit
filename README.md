@@ -36,7 +36,9 @@ Copy the example env file and fill in your API keys:
 cp .env.example .env
 ```
 
-At minimum you need one provider API key matching a provider in your `config.toml` (e.g. `GOOGLE_API_KEY` for Google). See [.env.example](.env.example) for all options.
+We recommend starting with a **Google Gemini** API key — get one for free at [Google AI Studio](https://aistudio.google.com/welcome). Set `GOOGLE_API_KEY` in your `.env` file. See [.env.example](.env.example) for all options.
+
+For faster but less capable alternatives, you can also configure [Groq](https://console.groq.com/) or [Inception Labs](https://www.inceptionlabs.ai/) — see `config.example.toml` for details.
 
 ### 3. Configure models & providers
 
@@ -48,9 +50,11 @@ cp config.example.toml config.toml
 
 This is where you configure which LLM providers, models, and optional features (sandbox, dependencies) are available. See [config.example.toml](config.example.toml) for all options with comments.
 
-**Recommended setup:** Google with `gemini-3-flash-preview` offers a good balance of performance and quality. Groq is also supported with `openai/gpt-oss-120b` and `moonshotai/kimi-k2-instruct-0905` (Kimi K2) — faster, but don't match Gemini 3 Flash on quality.
+### 4. Sandbox code execution (optional)
 
-### 4. Run
+cuttlekit supports running LLM-generated code in sandboxes, enabling integration with external APIs and libraries. We currently support [Deno Deploy Sandbox](https://deno.com/deploy/sandbox) — set `DENO_API_KEY` in your `.env` and uncomment the `[sandbox]` section in `config.toml` to enable it.
+
+### 5. Run
 
 ```bash
 pnpm run dev:backend   # Terminal 1 — auto-loads .env from project root
@@ -64,6 +68,15 @@ pnpm run dev:backend:no-env
 ```
 
 Then open http://localhost:5173 🚀
+
+## Current Constraints
+
+We're actively working on these:
+
+- **Persistence** — Only [Turso](https://turso.tech/) (libSQL) is supported as a database backend at the moment
+- **Authentication** — No auth yet, single-user only
+- **Code execution docs** — Sandbox documentation for packages is currently limited to markdown links
+- **Frontend** — Only the included example frontend is supported; React and other framework integrations are planned
 
 ## License
 
