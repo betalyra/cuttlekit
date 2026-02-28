@@ -1,9 +1,6 @@
 import { Effect, Stream, pipe, DateTime, Duration, Ref, Option } from "effect";
 import { streamText, type TextStreamPart } from "ai";
-import {
-  LanguageModelProvider,
-  type LanguageModelConfig,
-} from "@betalyra/generative-ui-common/server";
+import type { LanguageModelConfig } from "@betalyra/generative-ui-common/server";
 import { MemoryService, type MemorySearchResult } from "../memory/index.js";
 import { accumulateLinesWithFlush } from "../../stream/utils.js";
 import { PatchValidator, renderCETree, type Patch, type ValidationContext } from "../vdom/index.js";
@@ -31,7 +28,6 @@ export class GenerateService extends Effect.Service<GenerateService>()(
   {
     accessors: true,
     effect: Effect.gen(function* () {
-      const defaultConfig = yield* LanguageModelProvider;
       const modelRegistry = yield* ModelRegistry;
       const memory = yield* MemoryService;
       const patchValidator = yield* PatchValidator;
@@ -346,9 +342,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
         Effect.gen(function* () {
           const { sessionId, currentHtml, catalog, actions } = options;
 
-          const modelConfig = options.modelId
-            ? yield* modelRegistry.resolve(options.modelId)
-            : defaultConfig;
+          const modelConfig = yield* modelRegistry.resolve(options.modelId);
 
           // Build per-request sandbox tools (only when sandbox is configured)
           // Reuse session-scoped sandboxCtx (warm mode) or create fresh one (lazy)

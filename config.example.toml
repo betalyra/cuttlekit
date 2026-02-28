@@ -1,23 +1,13 @@
 # Default model used when no model is selected in the UI.
 # Must match an id from one of the providers below.
-default_model = "moonshotai/kimi-k2-instruct-0905"
+default_model = "gemini-3-flash-preview"
+
+# Model for background operations (e.g. memory summarization).
+# Defaults to default_model if omitted.
+background_model = "gemini-3-flash-preview"
 
 # --- Model Providers ---
 # Each provider needs a matching <PROVIDER>_API_KEY env var.
-
-[providers.groq]
-
-[providers.groq.options]
-# Provider-specific options passed to the AI SDK
-openai = { streamOptions = { includeUsage = true } }
-
-[[providers.groq.models]]
-id = "moonshotai/kimi-k2-instruct-0905"
-label = "Kimi K2"
-
-[[providers.groq.models]]
-id = "openai/gpt-oss-120b"
-label = "GPT-OSS 120B"
 
 [providers.google]
 
@@ -28,41 +18,59 @@ thinkingConfig = { thinkingLevel = "minimal" }
 id = "gemini-3-flash-preview"
 label = "Gemini 3 Flash"
 
-[providers.inception]
+# --- Additional providers (optional) ---
+# Uncomment and add the corresponding API key to use.
 
-[providers.inception.options]
-# "instant" enables near-instant responses (ideal for real-time UIs)
-openaiCompatible = { reasoningEffort = "instant" }
+# [providers.groq]
+#
+# [providers.groq.options]
+# # Provider-specific options passed to the AI SDK
+# openai = { streamOptions = { includeUsage = true } }
+#
+# [[providers.groq.models]]
+# id = "moonshotai/kimi-k2-instruct-0905"
+# label = "Kimi K2"
+#
+# [[providers.groq.models]]
+# id = "openai/gpt-oss-120b"
+# label = "GPT-OSS 120B"
 
-[[providers.inception.models]]
-id = "mercury-2"
-label = "Mercury 2"
+# [providers.inception]
+#
+# [providers.inception.options]
+# # "instant" enables near-instant responses (ideal for real-time UIs)
+# openaiCompatible = { reasoningEffort = "instant" }
+#
+# [[providers.inception.models]]
+# id = "mercury-2"
+# label = "Mercury 2"
 
 # --- Sandbox (optional) ---
 # Enables server-side code execution for LLM-generated code.
+# Requires a Deno Deploy API key (DENO_API_KEY env var).
 # Remove this section entirely to disable sandboxing.
 
-[sandbox]
-provider = "deno"                # Currently only "deno" is supported
-init_mode = "lazy"               # "lazy" (boot on first use) or "eager" (boot on session start)
-sandbox_scope = "user"           # "user" (shared across sessions) or "session" (isolated per session)
-
-[sandbox.deno]
-region = "ams"                   # Deno Deploy region (ams, ord, etc.)
-use_snapshots = false            # Snapshot support (currently only ord region)
-snapshot_capacity_mb = 10000
-volume_capacity_mb = 5000
-timeout_seconds = 300
-memory_mb = 1280
-
-# --- Sandbox Dependencies (optional) ---
-# Packages available inside the sandbox. Each can have:
-#   - docs: URLs for documentation search
-#   - secret_env: env var name injected into the sandbox
-#   - hosts: allowed outbound hostnames
-
-[[sandbox.dependencies]]
-package = "@linear/sdk"
-docs = ["https://linear.app/developers/sdk.md"]
-secret_env = "LINEAR_API_KEY"
-hosts = ["api.linear.app"]
+# [sandbox]
+# provider = "deno"                # Currently only "deno" is supported
+# init_mode = "lazy"               # "lazy" (boot on first use) or "eager" (boot on session start)
+# sandbox_scope = "user"           # "user" (shared across sessions) or "session" (isolated per session)
+#
+# [sandbox.deno]
+# region = "ams"                   # Deno Deploy region (ams, ord, etc.)
+# use_snapshots = false            # Snapshot support (currently only ord region)
+# snapshot_capacity_mb = 10000
+# volume_capacity_mb = 5000
+# timeout_seconds = 300
+# memory_mb = 1280
+#
+# # --- Sandbox Dependencies (optional) ---
+# # Packages available inside the sandbox. Each can have:
+# #   - docs: URLs for documentation search
+# #   - secret_env: env var name injected into the sandbox
+# #   - hosts: allowed outbound hostnames
+#
+# [[sandbox.dependencies]]
+# package = "@linear/sdk"
+# docs = ["https://linear.app/developers/sdk.md"]
+# secret_env = "LINEAR_API_KEY"
+# hosts = ["api.linear.app"]

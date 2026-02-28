@@ -141,7 +141,7 @@ export const modelsGroupLive = HttpApiBuilder.group(
       Effect.gen(function* () {
         const registry = yield* ModelRegistry;
         return {
-          models: registry.availableModels(),
+          models: registry.availableModels,
           defaultId: registry.defaultModelId,
         };
       })
@@ -162,7 +162,7 @@ export const streamGroupLive = HttpApiBuilder.group(
           // Validate model if specified
           if (payload.model) {
             const modelRegistry = yield* ModelRegistry;
-            const available = modelRegistry.availableModels();
+            const available = modelRegistry.availableModels;
             const isValid = available.some((m) => m.id === payload.model);
             if (!isValid) {
               return yield* new HttpApiError.BadRequest();
