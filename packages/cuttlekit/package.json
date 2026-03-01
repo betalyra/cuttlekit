@@ -1,0 +1,13 @@
+{
+  "name": "cuttlekit",
+  "version": "0.0.1",
+  "description": "cuttlekit is a generative UI toolkit that generates interactive UIs on the fly using LLMs.",
+  "author": "Betalyra",
+  "license": "SEE LICENSE IN LICENSE.md",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/betalyra/cuttlekit"
+  },
+  "homepage": "https://github.com/betalyra/cuttlekit",
+  "keywords": ["generative-ui", "llm", "ai", "ui-toolkit"]
+}
