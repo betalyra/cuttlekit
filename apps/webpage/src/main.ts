@@ -68,12 +68,14 @@ const app = {
   eventSource: null as EventSource | null,
   lastOffset: -1,
   loading: false,
-  stats: null as {
-    cacheRate: number;
-    tokensPerSecond: number;
-    mode: "patches" | "full";
-    patchCount: number;
-  } | null,
+  stats: {
+    cacheRate: 0,
+    tokensPerSecond: 0,
+    mode: "patches" as "patches" | "full",
+    patchCount: 0,
+    ttft: 0,
+    ttc: 0,
+  },
 
   getElements() {
     return {
@@ -158,22 +160,15 @@ const app = {
 
   updateStats() {
     const { statsEl } = this.getElements();
-    if (this.stats) {
-      const modeDisplay =
-        this.stats.mode === "patches"
-          ? `${this.stats.patchCount} patches`
-          : "full";
-      statsEl.innerHTML = `
-        <span title="Generation mode">${modeDisplay}</span>
-        <span class="text-[#a3a3a3]">·</span>
-        <span title="Tokens per second">${this.stats.tokensPerSecond} tok/s</span>
-        <span class="text-[#a3a3a3]">·</span>
-        <span title="Cache hit rate">${this.stats.cacheRate}% cache</span>
-      `;
-      statsEl.style.display = "flex";
-    } else {
-      statsEl.style.display = "none";
-    }
+    const s = this.stats;
+    const ttc = s.ttc >= 1000 ? `${(s.ttc / 1000).toFixed(1)}s` : `${s.ttc}ms`;
+    statsEl.innerHTML = [
+      `TTFT ${s.ttft}ms`,
+      `TTC ${ttc}`,
+      `${s.tokensPerSecond} tok/s`,
+      `${s.cacheRate}% cache`,
+    ].join(' · ');
+    statsEl.style.display = "flex";
   },
 
   handleStreamEvent(event: StreamEvent) {
@@ -227,6 +222,8 @@ const app = {
           tokensPerSecond: event.tokensPerSecond,
           mode: event.mode,
           patchCount: event.patchCount,
+          ttft: event.ttft,
+          ttc: event.ttc,
         };
         this.updateStats();
         break;
@@ -397,7 +394,7 @@ const app = {
     if (this.eventSource) this.eventSource.close();
     this.eventSource = null;
     this.lastOffset = -1;
-    this.stats = null;
+    this.stats = { cacheRate: 0, tokensPerSecond: 0, mode: "patches", patchCount: 0, ttft: 0, ttc: 0 };
     localStorage.removeItem(STORAGE_KEY);
 
     try {
@@ -435,6 +432,7 @@ const app = {
       this.setLoading(false, true);
     }
     this.connectSSE(this.sessionId);
+    this.updateStats();
 
     // Footer: Send button
     sendBtn.addEventListener("click", () => this.sendPrompt());

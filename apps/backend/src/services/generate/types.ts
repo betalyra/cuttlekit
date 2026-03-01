@@ -52,6 +52,8 @@ export const UnifiedResponseSchema = z.union([
     tokensPerSecond: z.number(),
     mode: z.enum(["patches", "full"]),
     patchCount: z.number(),
+    ttft: z.number(),
+    ttc: z.number(),
   }),
 ]);
 
