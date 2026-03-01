@@ -1,12 +1,3 @@
 {
-  "signedContributors": [
-    {
-      "name": "sigma-andex",
-      "id": 77549848,
-      "comment_id": 3979950121,
-      "created_at": "2026-03-01T13:23:20Z",
-      "repoId": 1103477015,
-      "pullRequestNo": 23
-    }
-  ]
+  "signedContributors": []
 }
