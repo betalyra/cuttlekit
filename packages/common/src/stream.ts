@@ -53,6 +53,8 @@ export const StatsEventSchema = Schema.Struct({
   tokensPerSecond: Schema.Number,
   mode: Schema.Literal("patches", "full"),
   patchCount: Schema.Number,
+  ttft: Schema.Number,
+  ttc: Schema.Number,
 });
 
 export const DoneEventSchema = Schema.Struct({

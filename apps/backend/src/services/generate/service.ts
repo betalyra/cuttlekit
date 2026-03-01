@@ -100,6 +100,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
         messages: readonly Message[],
         validationCtx: ValidationContext,
         usageRef: Ref.Ref<Usage[]>,
+        ttftRef: Ref.Ref<number>,
         modelConfig: LanguageModelConfig,
         requestTools?: SandboxTools,
       ): Stream.Stream<UnifiedResponse, GenerationError | Error> =>
@@ -215,6 +216,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
                       const ttft = Duration.toMillis(
                         DateTime.distanceDuration(streamStartTime, now),
                       );
+                      yield* Ref.set(ttftRef, ttft);
                       const prev = yield* Ref.get(lastEventTime);
                       const sinceLastMs = Duration.toMillis(
                         DateTime.distanceDuration(prev, now),
@@ -249,6 +251,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
         messages: readonly Message[],
         validationCtx: ValidationContext,
         usageRef: Ref.Ref<Usage[]>,
+        ttftRef: Ref.Ref<number>,
         patchesRef: Ref.Ref<Patch[]>,
         modeRef: Ref.Ref<"patches" | "full">,
         attempt: number,
@@ -266,6 +269,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
             messages,
             validationCtx,
             usageRef,
+            ttftRef,
             modelConfig,
             requestTools,
           ),
@@ -322,6 +326,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
                     ],
                     validationCtx,
                     usageRef,
+                    ttftRef,
                     patchesRef,
                     modeRef,
                     attempt + 1,
@@ -491,6 +496,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
 
           // Create Refs to track state across retries
           const usageRef = yield* Ref.make<Usage[]>([]);
+          const ttftRef = yield* Ref.make<number>(0);
           const patchesRef = yield* Ref.make<Patch[]>([]);
           const modeRef = yield* Ref.make<"patches" | "full">("patches");
           const startTime = yield* DateTime.now;
@@ -500,6 +506,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
             messages,
             validationCtx,
             usageRef,
+            ttftRef,
             patchesRef,
             modeRef,
             0,
@@ -561,6 +568,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
 
               const mode = yield* Ref.get(modeRef);
               const patches = yield* Ref.get(patchesRef);
+              const ttft = yield* Ref.get(ttftRef);
 
               return {
                 op: "stats" as const,
@@ -568,6 +576,8 @@ export class GenerateService extends Effect.Service<GenerateService>()(
                 tokensPerSecond: Math.round(tokensPerSecond),
                 mode,
                 patchCount: patches.length,
+                ttft: Math.round(ttft),
+                ttc: Math.round(elapsedMs),
               };
             }),
           );

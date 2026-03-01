@@ -66,6 +66,8 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
           tokensPerSecond: number;
           mode: "patches" | "full";
           patchCount: number;
+          ttft: number;
+          ttc: number;
         }
       | { type: "done"; html: string };
 
@@ -203,6 +205,8 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
                   tokensPerSecond: r.tokensPerSecond,
                   mode: r.mode,
                   patchCount: r.patchCount,
+                  ttft: r.ttft,
+                  ttc: r.ttc,
                 } as StreamEvent,
               ]),
             ),
