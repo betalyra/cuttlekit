@@ -4,7 +4,7 @@ import { MockLanguageModelV3 } from "ai/test";
 import { simulateReadableStream } from "ai";
 import type { LanguageModelV3StreamPart } from "@ai-sdk/provider";
 import { GenerateService } from "./service.js";
-import { extractDefaultUsage } from "@betalyra/generative-ui-common/server";
+import { extractDefaultUsage } from "@cuttlekit/common/server";
 import { PatchValidator } from "../vdom/index.js";
 import { MemoryService } from "../memory/index.js";
 import { ModelRegistry } from "../model-registry.js";

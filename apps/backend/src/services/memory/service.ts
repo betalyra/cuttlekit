@@ -1,11 +1,11 @@
 import { Effect, Match, Queue } from "effect";
 import { embed, generateText, Output } from "ai";
 import { z } from "zod";
-import type { Patch } from "@betalyra/generative-ui-common/client";
+import type { Patch } from "@cuttlekit/common/client";
 import {
   LanguageModelProvider,
   EmbeddingModelProvider,
-} from "@betalyra/generative-ui-common/server";
+} from "@cuttlekit/common/server";
 import type { UserPrompt, UserAction } from "../../types/messages.js";
 import { StoreService } from "./store.js";
 

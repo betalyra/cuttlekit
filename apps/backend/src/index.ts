@@ -8,7 +8,7 @@ import { GenerateService } from "./services/generate/index.js";
 import {
   GoogleEmbeddingModelLayer,
   LanguageModelProvider,
-} from "@betalyra/generative-ui-common/server";
+} from "@cuttlekit/common/server";
 import { SessionService } from "./services/session.js";
 import {
   DatabaseLayer,

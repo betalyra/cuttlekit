@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { Option } from "effect";
-import type { Action } from "@betalyra/generative-ui-common/client";
+import type { Action } from "@cuttlekit/common/client";
 import type { SandboxContext } from "../sandbox/manager.js";
 import type { ComponentSpec } from "../vdom/vdom.js";
 

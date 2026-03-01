@@ -1,5 +1,5 @@
 {
-    "name": "@betalyra/generative-ui-experiments",
+    "name": "@cuttlekit/experiments",
     "private": true,
     "version": "0.0.0",
     "type": "module",
@@ -15,7 +15,7 @@
         "typecheck": "tsc --noEmit"
     },
     "dependencies": {
-        "@betalyra/generative-ui-common": "workspace:*",
+        "@cuttlekit/common": "workspace:*",
         "@deno/sandbox": "^0.12.0",
         "@huggingface/transformers": "^3.8.1",
         "@libsql/client": "^0.17.0",

@@ -1,6 +1,6 @@
 import { Effect, Stream, pipe, DateTime, Duration, Ref, Option } from "effect";
 import { streamText, type TextStreamPart } from "ai";
-import type { LanguageModelConfig } from "@betalyra/generative-ui-common/server";
+import type { LanguageModelConfig } from "@cuttlekit/common/server";
 import { MemoryService, type MemorySearchResult } from "../memory/index.js";
 import { accumulateLinesWithFlush } from "../../stream/utils.js";
 import { PatchValidator, renderCETree, type Patch, type ValidationContext } from "../vdom/index.js";

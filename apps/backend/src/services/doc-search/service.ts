@@ -2,7 +2,7 @@ import { Effect, Option, pipe } from "effect";
 import { embed } from "ai";
 import type { EmbeddingModel } from "ai";
 import type { ProviderOptions } from "@ai-sdk/provider-utils";
-import { EmbeddingModelProvider } from "@betalyra/generative-ui-common/server";
+import { EmbeddingModelProvider } from "@cuttlekit/common/server";
 import { loadAppConfig, type SandboxDependencyConfig } from "../app-config.js";
 import { StoreService } from "../memory/store.js";
 import { ChunkingService, type DocChunkInput } from "./chunking.js";

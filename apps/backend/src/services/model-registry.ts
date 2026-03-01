@@ -10,7 +10,7 @@ import {
   extractGroqUsage,
   extractGoogleUsage,
   extractDefaultUsage,
-} from "@betalyra/generative-ui-common/server";
+} from "@cuttlekit/common/server";
 import { loadAppConfig, type ProviderConfig } from "./app-config.js";
 
 // ============================================================

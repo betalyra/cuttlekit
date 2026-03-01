@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 import type { Queue, PubSub, Ref, Fiber, Scope } from "effect";
-import type { Action, StreamEventWithOffset } from "@betalyra/generative-ui-common/client";
+import type { Action, StreamEventWithOffset } from "@cuttlekit/common/client";
 import type { SandboxContext } from "../sandbox/manager.js";
 
 // Re-export shared types so existing imports keep working
@@ -16,7 +16,7 @@ export {
   StreamEventSchema,
   type StreamEvent,
   type StreamEventWithOffset,
-} from "@betalyra/generative-ui-common/client";
+} from "@cuttlekit/common/client";
 
 // ============================================================
 // Action Payload Schema (for POST endpoint body — no `type` field)

@@ -1,5 +1,5 @@
 {
-  "name": "@betalyra/generative-ui-common",
+  "name": "@cuttlekit/common",
   "version": "0.0.0",
   "private": true,
   "description": "Common utilities for Generative UI",

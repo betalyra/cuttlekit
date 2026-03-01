@@ -1,7 +1,7 @@
 import "./style.css";
 import { loadFontsFromHTML } from "./fonts";
 import { loadIconsFromHTML } from "./icons";
-import type { Patch, StreamEventWithOffset } from "@betalyra/generative-ui-common/client";
+import type { Patch, StreamEventWithOffset } from "@cuttlekit/common/client";
 
 const API_BASE = "http://localhost:34512";
 const STORAGE_KEY = "generative-ui-stream";
