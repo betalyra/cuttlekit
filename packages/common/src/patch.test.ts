@@ -165,6 +165,23 @@ describe("applyPatch", () => {
       }
     });
 
+    it("handles IDs starting with a digit (UUIDs)", () => {
+      const doc = createDoc(
+        '<div id="65688b32-3739-4e4b-ad5c-656aed00b7fc">content</div>'
+      );
+      const patch: Patch = {
+        selector: "#65688b32-3739-4e4b-ad5c-656aed00b7fc",
+        text: "updated",
+      };
+
+      const result = applyPatch(doc, patch);
+
+      expect(result._tag).toBe("Success");
+      expect(
+        doc.getElementById("65688b32-3739-4e4b-ad5c-656aed00b7fc")?.textContent
+      ).toBe("updated");
+    });
+
     it("handles complex selectors", () => {
       const doc = createDoc(
         '<div class="container"><span data-id="123">target</span></div>'

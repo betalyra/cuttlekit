@@ -15,6 +15,10 @@ export type ApplyPatchResult =
   | { _tag: "ElementNotFound"; selector: string }
   | { _tag: "Error"; selector: string; error: string };
 
+// Bare #id selector — no CSS combinators, pseudo-classes, etc.
+const isSimpleIdSelector = (s: string): boolean =>
+  s.startsWith("#") && !/[\s>+~,:.[\]()]/.test(s.slice(1));
+
 /**
  * Apply a single patch to a document.
  * Works with both browser DOM and happy-dom.
@@ -27,10 +31,12 @@ export const applyPatch = (
   doc: Document | DocumentFragment,
   patch: Patch
 ): ApplyPatchResult => {
+  // Use getElementById for bare #id selectors to avoid CSS parsing issues
+  // with IDs that start with digits (e.g. UUIDs like #65688b32-...)
   const el =
-    "querySelector" in doc
-      ? doc.querySelector(patch.selector)
-      : (doc as Document).querySelector(patch.selector);
+    isSimpleIdSelector(patch.selector) && "getElementById" in doc
+      ? (doc as Document).getElementById(patch.selector.slice(1))
+      : doc.querySelector(patch.selector);
 
   if (!el) {
     return { _tag: "ElementNotFound", selector: patch.selector };
