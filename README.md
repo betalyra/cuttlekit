@@ -2,6 +2,10 @@
   <img src="assets/logo-text.svg" alt="cuttlekit" width="500" />
 </p>
 
+<p align="center">
+  <a href="https://discord.gg/ebtwHGcyXR"><img src="https://img.shields.io/badge/Discord-Join%20us-5865F2?logo=discord&logoColor=white" alt="Discord"></a>
+</p>
+
 cuttlekit is a generative UI toolkit that generates interactive UIs on the fly using LLMs.
 
 > ⚠️ **Highly experimental** — APIs, config format, and behavior may change at any time. Expect rough edges.
