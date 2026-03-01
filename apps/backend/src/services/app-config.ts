@@ -175,11 +175,8 @@ const resolveSandbox = (def: SandboxDef) =>
 export const loadAppConfig = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
 
-  // Read and parse TOML
-  const configPath = yield* Config.string("CONFIG_PATH").pipe(
-    Config.withDefault("config.toml"),
-  );
-  const raw = yield* fs.readFileString(configPath);
+  // Read and parse TOML (resolved relative to cwd — run from workspace root)
+  const raw = yield* fs.readFileString("config.toml");
   const toml = yield* Schema.decodeUnknown(TomlSchema)(parse(raw));
 
   // Default model (overridable via DEFAULT_MODEL env var)

@@ -54,11 +54,17 @@ cp config.example.toml config.toml
 
 This is where you configure which LLM providers, models, and optional features (sandbox, dependencies) are available. See [config.example.toml](config.example.toml) for all options with comments.
 
-### 4. Sandbox code execution (optional)
+### 4. Database
+
+cuttlekit uses SQLite (via [Turso](https://turso.tech/)/libSQL) for persistence. **Database migrations run automatically on startup** — no manual step required.
+
+By default, a local `memory.db` file is created in the project root. To use a remote Turso database instead, set `DATABASE_URL` in your `.env` file.
+
+### 5. Sandbox code execution (optional)
 
 cuttlekit supports running LLM-generated code in sandboxes, enabling integration with external APIs and libraries. We currently support [Deno Deploy Sandbox](https://deno.com/deploy/sandbox) — set `DENO_API_KEY` in your `.env` and uncomment the `[sandbox]` section in `config.toml` to enable it.
 
-### 5. Run
+### 6. Run
 
 ```bash
 pnpm run dev:backend   # Terminal 1 — auto-loads .env from project root
