@@ -1,6 +1,6 @@
 import { Effect, Data, pipe } from "effect";
 import { Window } from "happy-dom";
-import { applyPatch, type Patch } from "@betalyra/generative-ui-common/client";
+import { applyPatch, type Patch } from "@cuttlekit/common/client";
 import { makeCEShell, renderCETree, type Registry, type ComponentSpec } from "./vdom.js";
 
 export type { Patch };

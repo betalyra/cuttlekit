@@ -81,7 +81,7 @@ importers:
 
   apps/backend:
     dependencies:
-      '@betalyra/generative-ui-common':
+      '@cuttlekit/common':
         specifier: workspace:*
         version: link:../../packages/common
       '@deno/sandbox':
@@ -99,7 +99,7 @@ importers:
 
   apps/experiments:
     dependencies:
-      '@betalyra/generative-ui-common':
+      '@cuttlekit/common':
         specifier: workspace:*
         version: link:../../packages/common
       '@deno/sandbox':
@@ -123,7 +123,7 @@ importers:
 
   apps/webpage:
     dependencies:
-      '@betalyra/generative-ui-common':
+      '@cuttlekit/common':
         specifier: workspace:*
         version: link:../../packages/common
       '@tailwindcss/vite':

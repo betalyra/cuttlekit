@@ -4,7 +4,7 @@ import {
   applyPatch,
   type Patch,
   type ApplyPatchResult,
-} from "@betalyra/generative-ui-common/client"
+} from "@cuttlekit/common/client"
 
 export type { Patch }
 

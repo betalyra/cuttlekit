@@ -88,7 +88,6 @@ We're actively working on these:
 - **Code execution docs** — Sandbox documentation for packages is currently limited to markdown links
 - **Frontend** — Only the included example frontend is supported; React and other framework integrations are planned
 
-
 ## License
 
 This software is licensed under the [O'Saasy License Agreement](./LICENSE.md).
