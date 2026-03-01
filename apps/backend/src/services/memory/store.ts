@@ -37,7 +37,7 @@ export class StoreService extends Effect.Service<StoreService>()(
 
       // ============ SESSIONS ============
 
-      const insertSession = (data: Omit<NewSession, "id">) =>
+      const insertSession = (data: NewSession) =>
         Effect.gen(function* () {
           const result = yield* Effect.promise(() =>
             db.insert(sessions).values(data).returning()
