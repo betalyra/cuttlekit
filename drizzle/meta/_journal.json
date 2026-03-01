@@ -5,50 +5,8 @@
     {
       "idx": 0,
       "version": "6",
-      "when": 1769201756694,
-      "tag": "0000_swift_zombie",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "6",
-      "when": 1769201904169,
-      "tag": "0001_vector_index",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "6",
-      "when": 1771161427358,
-      "tag": "0002_daffy_white_queen",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "6",
-      "when": 1771579562984,
-      "tag": "0003_oval_wendell_rand",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "6",
-      "when": 1771581600000,
-      "tag": "0004_sandbox_vector_indexes",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "6",
-      "when": 1771686581681,
-      "tag": "0005_bent_secret_warriors",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "6",
-      "when": 1772095501977,
-      "tag": "0006_steep_felicia_hardy",
+      "when": 1772369299951,
+      "tag": "0000_woozy_black_queen",
       "breakpoints": true
     }
   ]

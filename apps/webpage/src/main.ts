@@ -179,15 +179,18 @@ const app = {
   handleStreamEvent(event: StreamEvent) {
     switch (event.type) {
       case "session":
-        // Stream session ID is informational once we already established one.
-        // Keeping the existing ID avoids accidentally switching POSTs to a
-        // different session while SSE is still attached to the current stream.
         if (!this.sessionId) {
           this.sessionId = event.sessionId;
         } else if (this.sessionId !== event.sessionId) {
-          console.warn(
-            `Ignoring mismatched session event. current=${this.sessionId} event=${event.sessionId}`,
+          // Backend assigned a new session (e.g. old ID no longer in DB).
+          // Accept it, persist, and reconnect SSE to the new session.
+          console.info(
+            `Session migrated: ${this.sessionId} → ${event.sessionId}`,
           );
+          this.sessionId = event.sessionId;
+          this.lastOffset = -1;
+          this.saveStreamState();
+          this.connectSSE(this.sessionId);
         }
         break;
       case "define": {
