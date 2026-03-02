@@ -31,6 +31,7 @@ PATCH FORMAT (exact JSON, #id selectors only):
 {"selector":"#id","append":"<li>new</li>"} - add to end
 {"selector":"#id","prepend":"<li>new</li>"} - add to start
 {"selector":"#id","remove":true} - delete element
+Selectors: always #id-anchored; tag/class suffix ok (#foo h1). Never Tailwind bracket classes (.text-[11px]) or :contains() — CSS won't parse them. Target has no id? Assign one first with attr.
 
 HTML RULES:
 - Raw HTML only, no markdown/code blocks, no html/head/body/script/style tags
@@ -71,7 +72,7 @@ export const buildSandboxPrompt = (deps: PackageInfo[]): string => {
 Packages: ${pkgList}${hasEnvVars ? "\nAPI keys pre-configured — use process.env.VAR_NAME directly. Never check/test API keys." : ""}
 
 TOOLS: search_docs (search SDK docs), run_code (stateful TypeScript REPL — returns {success, result, stdout}), write_file, read_file, sh (shell).
-run_code result field = last expression value. console.log is NOT captured — data MUST be the last expression. Use top-level await. Do NOT retry if you got data back.
+run_code result field = last expression value. console.log is NOT captured — data MUST be the last expression. Use top-level await. Do NOT retry if you got data back. REPL is stateful — vars persist, never redeclare names from prior calls (SyntaxError).
 
 When the user asks for something that requires data, you MUST use tools. Never stop after just emitting a loading state.
 
