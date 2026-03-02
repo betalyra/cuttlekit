@@ -68,19 +68,26 @@ export const buildSandboxPrompt = (deps: PackageInfo[]): string => {
     .join(", ");
   const hasEnvVars = deps.some((d) => d.envVar);
 
-  return `\n\nSANDBOX: Execute TypeScript in a sandboxed environment.
+  return `\n\nSANDBOX: TypeScript sandbox.
 Packages: ${pkgList}${hasEnvVars ? "\nAPI keys pre-configured — use process.env.VAR_NAME directly. Never check/test API keys." : ""}
 
-TOOLS: search_docs (search SDK docs), run_code (stateful TypeScript REPL — returns {success, result, stdout}), write_file, read_file, sh (shell).
-run_code result field = last expression value. console.log is NOT captured — data MUST be the last expression. Use top-level await. Do NOT retry if you got data back. REPL is stateful — vars persist, never redeclare names from prior calls (SyntaxError).
+TOOLS:
+- search_docs: search SDK docs
+- run_code (stateful TS REPL → {success,result,stdout}):
+  - result = last expression — write flat top-level async code, no function wrappers, no IIFEs
+  - always await async calls; last line must be a bare expression not an assignment (wrong: \`const x = await api()\` → undefined; right: \`const x = await api(); x\`)
+  - no console.log; never redeclare prior names (SyntaxError); don't retry on success
+  - writing data? read back + return in same call
+  - return only UI-needed fields — include data predictable follow-up actions would require
+- write_file / read_file / sh: filesystem + shell
 
-When the user asks for something that requires data, you MUST use tools. Never stop after just emitting a loading state.
+Data requires tools — never stop at loading state.
 
-REQUIRED FLOW (all steps, one response):
-1. Emit loading/status patch matching current UI style
-2. Call search_docs to learn the SDK API
-3. Call run_code with ALL code inline — fetch data + return results in ONE call. Multiple tool calls are expensive, consolidate code.
-4. Emit final UI patches replacing the loading state with real data`;
+REQUIRED FLOW (one response):
+1. Emit loading/status patch
+2. search_docs — learn the SDK API
+3. run_code — prefer one call; split only for complex multi-step logic
+4. Emit final patches replacing loading state`;
 };
 
 export const buildSystemPrompt = (deps?: PackageInfo[]): string =>
