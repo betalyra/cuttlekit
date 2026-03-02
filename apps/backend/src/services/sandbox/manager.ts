@@ -5,7 +5,7 @@ import type {
   SnapshotRef,
   SandboxSecret,
 } from "./types.js";
-import { SandboxError } from "./types.js";
+import { SandboxError, SandboxConnectionError } from "./types.js";
 import type { SandboxConfig } from "../app-config.js";
 
 // ============================================================
@@ -58,12 +58,18 @@ export type SandboxManagerInstance = {
   readonly getOrCreateSandbox: (
     sessionId: string,
     ctx: SandboxContext,
-  ) => Effect.Effect<SandboxHandle, SandboxError>;
+  ) => Effect.Effect<SandboxHandle, SandboxError | SandboxConnectionError>;
 
   /** Release a session's sandbox (closes its scope) */
   readonly releaseSandbox: (
     ctx: SandboxContext,
   ) => Effect.Effect<void>;
+
+  /** Release the stale sandbox and create a fresh one (used on connection-closed errors) */
+  readonly recreateSandbox: (
+    sessionId: string,
+    ctx: SandboxContext,
+  ) => Effect.Effect<SandboxHandle, SandboxError | SandboxConnectionError>;
 
   /** The resolved sandbox config */
   readonly config: SandboxConfig;
@@ -130,7 +136,7 @@ export const makeSandboxManager = (
     const getOrCreateSandbox = (
       sessionId: string,
       ctx: SandboxContext,
-    ): Effect.Effect<SandboxHandle, SandboxError> =>
+    ): Effect.Effect<SandboxHandle, SandboxError | SandboxConnectionError> =>
       ctx.lock.withPermits(1)(
         Effect.gen(function* () {
           const existing = yield* Ref.get(ctx.ref);
@@ -193,10 +199,21 @@ export const makeSandboxManager = (
         }
       });
 
+    const recreateSandbox = (
+      sessionId: string,
+      ctx: SandboxContext,
+    ): Effect.Effect<SandboxHandle, SandboxError | SandboxConnectionError> =>
+      Effect.gen(function* () {
+        yield* Effect.log("Recreating sandbox (connection closed)", { sessionId });
+        yield* releaseSandbox(ctx);
+        return yield* getOrCreateSandbox(sessionId, ctx);
+      });
+
     return {
       ensureSnapshot,
       getOrCreateSandbox,
       releaseSandbox,
+      recreateSandbox,
       config,
     } satisfies SandboxManagerInstance;
   });

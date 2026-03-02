@@ -56,10 +56,11 @@ const makeCEShell = (registry: Registry, tag: string) => {
   }
 }
 
-const renderTree = (win: InstanceType<typeof Window>, registry: Registry) =>
+const renderTree = (win: InstanceType<typeof Window>, registry: Registry, force = false) =>
   pipe(
     [...win.document.querySelectorAll("*")]
-      .filter((el) => registry.has(el.tagName.toLowerCase())),
+      .filter((el) => registry.has(el.tagName.toLowerCase()))
+      .filter((el) => force || (el as HappyHTMLElement).children.length === 0),
     Effect.forEach((el) => Effect.sync(() => (el as any).render()))
   )
 
@@ -230,7 +231,7 @@ export class VdomService extends Effect.Service<VdomService>()("VdomService", {
         const registry = yield* getRegistry(sessionId)
         if (registry.size === 0) return
 
-        yield* renderTree(window, registry)
+        yield* renderTree(window, registry, true)
       })
 
     const applyPatches = (sessionId: string, patches: Patch[]) =>

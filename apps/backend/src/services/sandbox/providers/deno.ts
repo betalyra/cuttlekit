@@ -1,5 +1,5 @@
 import { Effect, Redacted, Config, Ref, Option } from "effect";
-import { Client, Sandbox, Volume } from "@deno/sandbox";
+import { Client, Sandbox, Volume, ConnectionClosedError } from "@deno/sandbox";
 import type {
   SandboxProvider,
   SandboxHandle,
@@ -10,8 +10,15 @@ import type {
   SnapshotRef,
   VolumeRef,
 } from "../types.js";
-import { SandboxError } from "../types.js";
+import { SandboxError, SandboxConnectionError } from "../types.js";
 import type { SandboxConfig } from "../../app-config.js";
+
+const wrapError = (e: unknown, prefix: string): SandboxError | SandboxConnectionError => {
+  if (e instanceof ConnectionClosedError) {
+    return new SandboxConnectionError({ message: `${prefix}: ${e.message}`, cause: e });
+  }
+  return new SandboxError({ message: `${prefix}: ${e}`, cause: e });
+};
 
 // ============================================================
 // Deno Sandbox Provider
@@ -84,7 +91,7 @@ export const makeDenoProvider = (sandboxConfig: SandboxConfig) =>
 
           const evalCode = (
             code: string,
-          ): Effect.Effect<SandboxResult, SandboxError> =>
+          ): Effect.Effect<SandboxResult, SandboxError | SandboxConnectionError> =>
             Effect.gen(function* () {
               const maybeRepl = yield* Ref.get(replRef);
               if (Option.isNone(maybeRepl)) {
@@ -99,15 +106,10 @@ export const makeDenoProvider = (sandboxConfig: SandboxConfig) =>
                   const result = await maybeRepl.value.eval(code);
                   return { success: true as const, result, stdout: "" };
                 },
-                catch: (e) => {
-                  const errorMsg = e instanceof Error ? e.message : String(e);
-                  return new SandboxError({
-                    message: `Sandbox eval failed: ${errorMsg}`,
-                    cause: e,
-                  });
-                },
+                catch: (e) => wrapError(e, "Sandbox eval failed"),
               }).pipe(
-                Effect.catchAll((error) =>
+                // Only swallow SandboxError — let SandboxConnectionError propagate for reconnect
+                Effect.catchTag("SandboxError", (error) =>
                   Effect.succeed({
                     success: false as const,
                     error: error.message,
@@ -120,21 +122,13 @@ export const makeDenoProvider = (sandboxConfig: SandboxConfig) =>
           const writeTextFile = (path: string, content: string) =>
             Effect.tryPromise({
               try: () => sb.fs.writeTextFile(path, content),
-              catch: (e) =>
-                new SandboxError({
-                  message: `writeTextFile failed: ${e}`,
-                  cause: e,
-                }),
+              catch: (e) => wrapError(e, "writeTextFile failed"),
             });
 
           const readTextFile = (path: string) =>
             Effect.tryPromise({
               try: () => sb.fs.readTextFile(path),
-              catch: (e) =>
-                new SandboxError({
-                  message: `readTextFile failed: ${e}`,
-                  cause: e,
-                }),
+              catch: (e) => wrapError(e, "readTextFile failed"),
             });
 
           const sh = (command: string) =>
@@ -154,11 +148,7 @@ export const makeDenoProvider = (sandboxConfig: SandboxConfig) =>
                   exitCode: result.status.code,
                 } satisfies ShellResult;
               },
-              catch: (e) =>
-                new SandboxError({
-                  message: `sh failed: ${e}`,
-                  cause: e,
-                }),
+              catch: (e) => wrapError(e, "sh failed"),
             });
 
           return {

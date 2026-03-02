@@ -28,9 +28,12 @@ const interpolate = (template: string, props: string[], el: Element) =>
     template,
   );
 
-const renderElement = (el: Element) => {
+const renderElement = (el: Element, force = false) => {
   const spec = registry.get(el.tagName.toLowerCase());
   if (!spec) return;
+  // Skip already-rendered elements unless forced (e.g. template redefinition).
+  // Without this, renderTree after every append patch would wipe patched content.
+  if (!force && el.children.length > 0) return;
   const existing = el.querySelector("[data-children]");
   const children = [...(existing ?? el).children];
   el.innerHTML = interpolate(spec.template, spec.props, el);
@@ -38,12 +41,12 @@ const renderElement = (el: Element) => {
   if (container) children.forEach((c) => container.appendChild(c));
 };
 
-const renderTree = (root: Element) => {
+const renderTree = (root: Element, force = false) => {
   if (registry.size === 0) return;
   const tags = [...registry.keys()];
   [...root.querySelectorAll("*")]
     .filter((el) => tags.includes(el.tagName.toLowerCase()))
-    .forEach(renderElement);
+    .forEach((el) => renderElement(el, force));
 };
 
 type StreamState = {
@@ -198,7 +201,7 @@ const app = {
         });
         // Re-render existing instances
         const { contentEl } = this.getElements();
-        contentEl.querySelectorAll(event.tag).forEach(renderElement);
+        contentEl.querySelectorAll(event.tag).forEach((el) => renderElement(el, true));
         break;
       }
       case "patch": {

@@ -30,17 +30,17 @@ export type ShellResult = {
 export type SandboxHandle = {
   /** Initialise the REPL. Call AFTER dependencies are installed. */
   readonly initRepl: () => Effect.Effect<void, SandboxError>;
-  readonly eval: (code: string) => Effect.Effect<SandboxResult, SandboxError>;
+  readonly eval: (code: string) => Effect.Effect<SandboxResult, SandboxError | SandboxConnectionError>;
   readonly writeTextFile: (
     path: string,
     content: string,
-  ) => Effect.Effect<void, SandboxError>;
+  ) => Effect.Effect<void, SandboxError | SandboxConnectionError>;
   readonly readTextFile: (
     path: string,
-  ) => Effect.Effect<string, SandboxError>;
+  ) => Effect.Effect<string, SandboxError | SandboxConnectionError>;
   readonly sh: (
     command: string,
-  ) => Effect.Effect<ShellResult, SandboxError>;
+  ) => Effect.Effect<ShellResult, SandboxError | SandboxConnectionError>;
 };
 
 // ============================================================
@@ -99,6 +99,14 @@ export class SandboxExecError extends Schema.TaggedError<SandboxExecError>()(
   {
     message: Schema.String,
     stdout: Schema.optionalWith(Schema.String, { default: () => "" }),
+  },
+) {}
+
+export class SandboxConnectionError extends Schema.TaggedError<SandboxConnectionError>()(
+  "SandboxConnectionError",
+  {
+    message: Schema.String,
+    cause: Schema.optional(Schema.Unknown),
   },
 ) {}
 

@@ -162,6 +162,12 @@ const makeMockManager = (handle: SandboxHandle): SandboxManagerInstance => ({
       return handle;
     }),
   releaseSandbox: (ctx: SandboxContext) => Ref.set(ctx.ref, Option.none()),
+  recreateSandbox: (_sessionId: string, ctx: SandboxContext) =>
+    Effect.gen(function* () {
+      yield* Ref.set(ctx.ref, Option.none());
+      yield* Ref.set(ctx.ref, Option.some({ handle, scope: {} } as ManagedSandbox));
+      return handle;
+    }),
   config: mockSandboxConfig,
 });
 

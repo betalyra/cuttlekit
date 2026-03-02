@@ -4,7 +4,7 @@ import { z } from "zod";
 import { DocSearchService } from "../doc-search/service.js";
 import { SandboxService } from "../sandbox/service.js";
 import type { SandboxContext } from "../sandbox/manager.js";
-import { SandboxError } from "../sandbox/types.js";
+import { SandboxError, SandboxConnectionError } from "../sandbox/types.js";
 import type { SandboxHandle } from "../sandbox/types.js";
 
 // ============================================================
@@ -64,7 +64,7 @@ export class ToolService extends Effect.Service<ToolService>()("ToolService", {
 
     const withSandbox = (
       ctx: ToolContext,
-    ): Effect.Effect<SandboxHandle, SandboxError> =>
+    ): Effect.Effect<SandboxHandle, SandboxError | SandboxConnectionError> =>
       Effect.gen(function* () {
         if (Option.isNone(sandboxOption)) {
           return yield* new SandboxError({ message: "Sandbox not configured" });
@@ -73,6 +73,25 @@ export class ToolService extends Effect.Service<ToolService>()("ToolService", {
         const manager = sandboxOption.value;
         return yield* manager.getOrCreateSandbox(ctx.sessionId, ctx.sandboxCtx);
       });
+
+    // ----------------------------------------------------------
+    // Shared: run op with automatic reconnect on connection close
+    // ----------------------------------------------------------
+
+    const withReconnect = <A>(
+      ctx: ToolContext,
+      op: (handle: SandboxHandle) => Effect.Effect<A, SandboxError | SandboxConnectionError>,
+    ): Effect.Effect<A, SandboxError | SandboxConnectionError> =>
+      withSandbox(ctx).pipe(
+        Effect.flatMap(op),
+        Effect.tapError((error) => {
+          if (error instanceof SandboxConnectionError && Option.isSome(sandboxOption)) {
+            return sandboxOption.value.recreateSandbox(ctx.sessionId, ctx.sandboxCtx).pipe(Effect.asVoid);
+          }
+          return Effect.void;
+        }),
+        Effect.retry({ times: 1, while: (e) => e instanceof SandboxConnectionError }),
+      );
 
     // ----------------------------------------------------------
     // run_code
@@ -93,8 +112,7 @@ export class ToolService extends Effect.Service<ToolService>()("ToolService", {
               codePreview: code.slice(0, 300),
             });
 
-            const handle = yield* withSandbox(ctx);
-            const result = yield* handle.eval(code);
+            const result = yield* withReconnect(ctx, (h) => h.eval(code));
 
             if (result.success) {
               yield* Effect.logDebug("run_code:done", { description });
@@ -136,8 +154,7 @@ export class ToolService extends Effect.Service<ToolService>()("ToolService", {
         }),
         execute: async ({ path, content }) => {
           const program = Effect.gen(function* () {
-            const handle = yield* withSandbox(ctx);
-            yield* handle.writeTextFile(path, content);
+            yield* withReconnect(ctx, (h) => h.writeTextFile(path, content));
             return { success: true as const, path };
           }).pipe(
             Effect.catchAll((e) =>
@@ -165,8 +182,7 @@ export class ToolService extends Effect.Service<ToolService>()("ToolService", {
         }),
         execute: async ({ path }) => {
           const program = Effect.gen(function* () {
-            const handle = yield* withSandbox(ctx);
-            const content = yield* handle.readTextFile(path);
+            const content = yield* withReconnect(ctx, (h) => h.readTextFile(path));
             return { success: true as const, content };
           }).pipe(
             Effect.catchAll((e) =>
@@ -196,8 +212,7 @@ export class ToolService extends Effect.Service<ToolService>()("ToolService", {
         }),
         execute: async ({ command }) => {
           const program = Effect.gen(function* () {
-            const handle = yield* withSandbox(ctx);
-            const result = yield* handle.sh(command);
+            const result = yield* withReconnect(ctx, (h) => h.sh(command));
             return { success: true as const, ...result };
           }).pipe(
             Effect.catchAll((e) =>
