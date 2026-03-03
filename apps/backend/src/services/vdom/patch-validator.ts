@@ -1,7 +1,13 @@
 import { Effect, Data, pipe } from "effect";
 import { Window } from "happy-dom";
 import { applyPatch, type Patch } from "@cuttlekit/common/client";
-import { makeCEShell, renderCETree, type Registry, type ComponentSpec } from "./vdom.js";
+import {
+  makeCEShell,
+  renderCETree,
+  callRenderIfPresent,
+  type Registry,
+  type ComponentSpec,
+} from "./vdom.js";
 
 export type { Patch };
 
@@ -125,7 +131,7 @@ export class PatchValidator extends Effect.Service<PatchValidator>()(
           // Re-render existing instances of this tag
           yield* pipe(
             [...ctx.window.document.querySelectorAll(spec.tag)],
-            Effect.forEach((el) => Effect.sync(() => (el as any).render())),
+            Effect.forEach((el) => Effect.sync(() => callRenderIfPresent(el))),
           );
         });
 
@@ -177,8 +183,9 @@ export class PatchValidator extends Effect.Service<PatchValidator>()(
           const hasStructuralMutation = patches.some(
             (p) => "append" in p || "prepend" in p || "html" in p,
           );
-          if (hasStructuralMutation && ctx.registry.size > 0) {
-            yield* renderCETree(ctx.window, ctx.registry);
+          const hasAttrMutation = patches.some((p) => "attr" in p);
+          if ((hasStructuralMutation || hasAttrMutation) && ctx.registry.size > 0) {
+            yield* renderCETree(ctx.window, ctx.registry, hasAttrMutation);
           }
           return result;
         });

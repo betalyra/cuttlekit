@@ -81,10 +81,12 @@ TOOLS:
   - return only UI-needed fields — include data predictable follow-up actions would require
 - write_file / read_file / sh: filesystem + shell
 
-Data requires tools — never stop at loading state.
+Use tools ONLY when the request actually needs external data, code execution, file I/O, or shell commands.
+For pure UI/layout/state updates (e.g. counters, toggles, styling, text edits), do NOT call tools.
+If you emit a loading state, you must complete the flow in the same response.
 
 REQUIRED FLOW (one response):
-1. Emit loading/status patch
+1. Emit loading/status patch (only for tool/data workflows)
 2. search_docs — learn the SDK API
 3. run_code — prefer one call; split only for complex multi-step logic
 4. Emit final patches replacing loading state`;

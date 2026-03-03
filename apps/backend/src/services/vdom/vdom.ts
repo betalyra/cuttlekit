@@ -28,6 +28,10 @@ export type ApplyPatchesResult = {
   html: string
 }
 
+type MaybeRenderableElement = HappyHTMLElement & {
+  render?: () => void
+}
+
 // ============================================================
 // CE rendering helpers
 // ============================================================
@@ -38,20 +42,52 @@ const interpolate = (template: string, props: readonly string[], el: HappyHTMLEl
     template
   )
 
+const renderCEElement = (registry: Registry, el: HappyHTMLElement) => {
+  const tag = el.tagName.toLowerCase()
+  const spec = registry.get(tag)
+  if (!spec) return
+  const existing = el.querySelector("[data-children]")
+  const children = [...(existing ?? el).children]
+  el.innerHTML = interpolate(spec.template, spec.props, el)
+  const container = el.querySelector("[data-children]")
+  if (container) children.forEach((c) => container.appendChild(c))
+}
+
+const hasElementShape = (value: unknown): value is HappyHTMLElement =>
+  Boolean(
+    value &&
+      typeof value === "object" &&
+      "tagName" in value &&
+      "querySelector" in value &&
+      "innerHTML" in value
+  )
+
+const isRegisteredComponentElement = (registry: Registry, value: unknown): value is HappyHTMLElement =>
+  hasElementShape(value) && registry.has(value.tagName.toLowerCase())
+
+const renderRegisteredComponentElement = (registry: Registry, value: unknown) => {
+  if (!isRegisteredComponentElement(registry, value)) return
+  renderCEElement(registry, value)
+}
+
+const callRenderIfPresent = (value: unknown) => {
+  if (!hasElementShape(value)) return
+  const maybeRenderable = value as MaybeRenderableElement
+  maybeRenderable.render?.()
+}
+
 const makeCEShell = (registry: Registry, tag: string) => {
   const props = registry.get(tag)?.props ?? []
   return class extends HappyHTMLElement {
     static observedAttributes = [...props]
     connectedCallback() {}
-    attributeChangedCallback() { if (this.isConnected) (this as any).render() }
+    attributeChangedCallback() {
+      if (this.isConnected) {
+        renderRegisteredComponentElement(registry, this)
+      }
+    }
     render() {
-      const spec = registry.get(tag)
-      if (!spec) return
-      const existing = this.querySelector("[data-children]")
-      const children = [...(existing ?? this).children]
-      this.innerHTML = interpolate(spec.template, spec.props, this)
-      const container = this.querySelector("[data-children]")
-      if (container) children.forEach((c) => container.appendChild(c))
+      renderCEElement(registry, this)
     }
   }
 }
@@ -61,11 +97,11 @@ const renderTree = (win: InstanceType<typeof Window>, registry: Registry, force 
     [...win.document.querySelectorAll("*")]
       .filter((el) => registry.has(el.tagName.toLowerCase()))
       .filter((el) => force || (el as HappyHTMLElement).children.length === 0),
-    Effect.forEach((el) => Effect.sync(() => (el as any).render()))
+    Effect.forEach((el) => Effect.sync(() => renderRegisteredComponentElement(registry, el)))
   )
 
 // Exported for PatchValidator's validation context
-export { makeCEShell, renderTree as renderCETree }
+export { makeCEShell, renderTree as renderCETree, callRenderIfPresent }
 
 // ============================================================
 // VdomService - Manages happy-dom instances + component registry per session
@@ -170,7 +206,7 @@ export class VdomService extends Effect.Service<VdomService>()("VdomService", {
         // Re-render existing instances of this tag
         yield* pipe(
           [...window.document.querySelectorAll(op.tag)],
-          Effect.forEach((el) => Effect.sync(() => (el as any).render()))
+          Effect.forEach((el) => Effect.sync(() => renderRegisteredComponentElement(registry, el)))
         )
       })
 
@@ -269,14 +305,15 @@ export class VdomService extends Effect.Service<VdomService>()("VdomService", {
           A.length
         )
 
-        // Render CEs after structural mutations
+        // Re-render CEs after structural mutations and CE attr updates.
         const hasStructuralMutation = patches.some(
           (p) => "append" in p || "prepend" in p || "html" in p
         )
-        if (hasStructuralMutation) {
+        const hasAttrMutation = patches.some((p) => "attr" in p)
+        if (hasStructuralMutation || hasAttrMutation) {
           const registry = yield* getRegistry(sessionId)
           if (registry.size > 0) {
-            yield* renderTree(window, registry)
+            yield* renderTree(window, registry, hasAttrMutation)
           }
         }
 

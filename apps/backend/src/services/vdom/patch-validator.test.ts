@@ -260,7 +260,34 @@ describe("PatchValidator", () => {
   });
 
   describe("validateAllWithRender", () => {
-    it.effect("renders CEs after structural patches, matching real VDOM behavior", () =>
+    it.effect("re-renders CE template when attr patch updates CE props", () =>
+      Effect.gen(function* () {
+        const validator = yield* PatchValidator;
+        const ctx = yield* validator.createValidationContext("");
+
+        yield* validator.defineComponent(ctx, {
+          tag: "counter-card",
+          props: ["count"],
+          template:
+            "<div class='card'><div id='count-display'>{count}</div></div>",
+        });
+
+        yield* validator.setFullHtml(
+          ctx,
+          '<div id="root"><counter-card id="counter" count="0"></counter-card></div>'
+        );
+
+        const result = yield* validator.validateAllWithRender(ctx, [
+          { selector: "#counter", attr: { count: "1" } },
+        ]);
+
+        expect(result).toHaveLength(1);
+        expect(ctx.doc.querySelector("#counter")?.getAttribute("count")).toBe("1");
+        expect(ctx.doc.querySelector("#count-display")?.textContent).toBe("1");
+      }).pipe(Effect.provide(PatchValidator.Default))
+    );
+
+    it.effect("keeps CE data-children content addressable after append patches", () =>
       Effect.gen(function* () {
         const validator = yield* PatchValidator;
         const ctx = yield* validator.createValidationContext("");
@@ -284,21 +311,12 @@ describe("PatchValidator", () => {
           { selector: "#c1", append: '<div id="loading">Loading...</div>' },
         ]);
 
-        // After renderTree, #loading should be gone (wiped by CE re-render)
-        // so trying to remove it should fail — matching real VDOM behavior
-        const exit = yield* Effect.exit(
-          validator.validateAllWithRender(ctx, [
-            { selector: "#loading", remove: true },
-          ])
-        );
+        const result = yield* validator.validateAllWithRender(ctx, [
+          { selector: "#loading", remove: true },
+        ]);
 
-        expect(Exit.isFailure(exit)).toBe(true);
-        if (Exit.isFailure(exit)) {
-          const error = exit.cause;
-          if (error._tag === "Fail") {
-            expect(error.error.reason).toBe("selector_not_found");
-          }
-        }
+        expect(result).toHaveLength(1);
+        expect(ctx.doc.querySelector("#loading")).toBeNull();
       }).pipe(Effect.provide(PatchValidator.Default))
     );
 

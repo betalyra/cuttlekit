@@ -170,7 +170,7 @@ const app = {
       `TTC ${ttc}`,
       `${s.tokensPerSecond} tok/s`,
       `${s.cacheRate}% cache`,
-    ].join(' · ');
+    ].join(" · ");
     statsEl.style.display = "flex";
   },
 
@@ -201,15 +201,20 @@ const app = {
         });
         // Re-render existing instances
         const { contentEl } = this.getElements();
-        contentEl.querySelectorAll(event.tag).forEach((el) => renderElement(el, true));
+        contentEl
+          .querySelectorAll(event.tag)
+          .forEach((el) => renderElement(el, true));
         break;
       }
       case "patch": {
         const patch = event.patch as Patch;
         this.applyPatch(patch);
-        // Render CEs after structural mutations
-        if ("append" in patch || "prepend" in patch || "html" in patch) {
-          renderTree(this.getElements().contentEl);
+        // Re-render CEs after structural mutations and CE prop attr updates.
+        const hasStructuralMutation =
+          "append" in patch || "prepend" in patch || "html" in patch;
+        const hasAttrMutation = "attr" in patch;
+        if (hasStructuralMutation || hasAttrMutation) {
+          renderTree(this.getElements().contentEl, hasAttrMutation);
         }
         break;
       }
@@ -355,7 +360,7 @@ const app = {
     try {
       const res = await fetch(`${API_BASE}/models`);
       if (!res.ok) throw new Error(`Failed to fetch models: ${res.status}`);
-      const data = await res.json() as {
+      const data = (await res.json()) as {
         models: { id: string; provider: string; label: string }[];
         defaultId: string;
       };
@@ -370,9 +375,10 @@ const app = {
 
       // Restore from localStorage or use default
       const saved = localStorage.getItem(MODEL_STORAGE_KEY);
-      const initial = saved && data.models.some((m) => m.id === saved)
-        ? saved
-        : data.defaultId;
+      const initial =
+        saved && data.models.some((m) => m.id === saved)
+          ? saved
+          : data.defaultId;
       modelSelect.value = initial;
       this.selectedModel = initial;
 
@@ -397,7 +403,14 @@ const app = {
     if (this.eventSource) this.eventSource.close();
     this.eventSource = null;
     this.lastOffset = -1;
-    this.stats = { cacheRate: 0, tokensPerSecond: 0, mode: "patches", patchCount: 0, ttft: 0, ttc: 0 };
+    this.stats = {
+      cacheRate: 0,
+      tokensPerSecond: 0,
+      mode: "patches",
+      patchCount: 0,
+      ttft: 0,
+      ttc: 0,
+    };
     localStorage.removeItem(STORAGE_KEY);
 
     try {
