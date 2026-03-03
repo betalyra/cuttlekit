@@ -1,7 +1,7 @@
 import "./style.css";
 import { loadFontsFromHTML } from "./fonts";
 import { loadIconsFromHTML } from "./icons";
-import type { Patch, StreamEventWithOffset } from "@cuttlekit/common/client";
+import type { Action, Patch, StreamEventWithOffset } from "@cuttlekit/common/client";
 
 const API_BASE = "http://localhost:34512";
 const STORAGE_KEY = "generative-ui-stream";
@@ -285,11 +285,7 @@ const app = {
     };
   },
 
-  async submitAction(request: {
-    prompt?: string;
-    action?: string;
-    actionData?: Record<string, unknown>;
-  }) {
+  async submitAction(request: Action) {
     this.setLoading(true);
     this.setError(null);
 
@@ -299,7 +295,7 @@ const app = {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...request,
-          model: this.selectedModel ?? undefined,
+          model: request.model ?? this.selectedModel ?? undefined,
         }),
       });
       // Response is 202 — results arrive via SSE
@@ -309,10 +305,10 @@ const app = {
     }
   },
 
-  collectFormData(): Record<string, unknown> {
+  collectFormData(root: Element | Document = document): Record<string, unknown> {
     const formData: Record<string, unknown> = {};
 
-    document.querySelectorAll("input, textarea, select").forEach((input) => {
+    root.querySelectorAll("input, textarea, select").forEach((input) => {
       const el = input as
         | HTMLInputElement
         | HTMLTextAreaElement
@@ -334,15 +330,38 @@ const app = {
 
   triggerAction(actionElement: Element) {
     const action = actionElement.getAttribute("data-action");
-    const actionDataAttr = actionElement.getAttribute("data-action-data");
+    if (!action) return;
 
-    const formData = this.collectFormData();
+    const elementId = actionElement.id || undefined;
+    const elementTag = actionElement.tagName.toLowerCase();
+
+    // Find nearest ancestor with an id (the host component/container)
+    const findHost = (el: Element): Element | null => {
+      let cur = el.parentElement;
+      while (cur) {
+        if (cur.id) return cur;
+        cur = cur.parentElement;
+      }
+      return null;
+    };
+    const hostEl = findHost(actionElement);
+    const hostId = hostEl?.id || undefined;
+    const hostTag = hostEl?.tagName.toLowerCase() || undefined;
+
+    // Scope form data to host component; merge with explicit data-action-data
+    const actionDataAttr = actionElement.getAttribute("data-action-data");
+    const scopedFormData = hostEl ? this.collectFormData(hostEl) : {};
     const actionData = actionDataAttr ? JSON.parse(actionDataAttr) : {};
-    const mergedData = { ...formData, ...actionData };
+    const mergedData = { ...scopedFormData, ...actionData };
 
     this.submitAction({
-      action: action || undefined,
+      type: "action",
+      action,
       actionData: Object.keys(mergedData).length > 0 ? mergedData : undefined,
+      elementId,
+      elementTag,
+      hostId,
+      hostTag,
     });
   },
 
@@ -352,7 +371,7 @@ const app = {
     if (!prompt) return;
 
     promptInput.value = "";
-    this.submitAction({ prompt });
+    this.submitAction({ type: "prompt", prompt });
   },
 
   async fetchModels() {

@@ -177,13 +177,7 @@ export const streamGroupLive = HttpApiBuilder.group(
           const processor = yield* registry.getOrCreate(path.sessionId, userId);
           yield* registry.touch(path.sessionId);
 
-          yield* Queue.offer(processor.actionQueue, {
-            type: payload.prompt ? "prompt" : "action",
-            prompt: payload.prompt,
-            action: payload.action,
-            actionData: payload.actionData,
-            model: payload.model,
-          });
+          yield* Queue.offer(processor.actionQueue, payload);
 
           return { queued: true };
         }).pipe(

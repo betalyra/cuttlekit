@@ -9,17 +9,42 @@ import type { Patch } from "./patch.js";
 // Action — submitted by the client, processed by the backend
 // ============================================================
 
-export const ActionSchema = Schema.Struct({
-  type: Schema.Literal("prompt", "action"),
-  prompt: Schema.optional(Schema.String),
-  action: Schema.optional(Schema.String),
-  actionData: Schema.optional(
-    Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-  ),
+export const PromptActionSchema = Schema.Struct({
+  type: Schema.Literal("prompt"),
+  prompt: Schema.String,
   model: Schema.optional(Schema.String),
 });
 
+export const ActionDataValueSchema = Schema.Union(
+  Schema.String,
+  Schema.Number,
+  Schema.Boolean,
+  Schema.Null,
+);
+
+export const ActionDataSchema = Schema.Record({
+  key: Schema.String,
+  value: ActionDataValueSchema,
+});
+
+export type ActionData = typeof ActionDataSchema.Type;
+
+export const UiActionSchema = Schema.Struct({
+  type: Schema.Literal("action"),
+  action: Schema.String,
+  actionData: Schema.optional(ActionDataSchema),
+  elementId: Schema.optional(Schema.String),
+  elementTag: Schema.optional(Schema.String),
+  hostId: Schema.optional(Schema.String),
+  hostTag: Schema.optional(Schema.String),
+  model: Schema.optional(Schema.String),
+});
+
+export const ActionSchema = Schema.Union(PromptActionSchema, UiActionSchema);
+
 export type Action = typeof ActionSchema.Type;
+export type PromptAction = typeof PromptActionSchema.Type;
+export type UiAction = typeof UiActionSchema.Type;
 
 // ============================================================
 // Stream Events — emitted over SSE from backend to client

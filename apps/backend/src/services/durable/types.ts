@@ -1,12 +1,20 @@
 import { Schema } from "effect";
 import type { Queue, PubSub, Ref, Fiber, Scope } from "effect";
+import { ActionDataSchema } from "@cuttlekit/common/client";
 import type { Action, StreamEventWithOffset } from "@cuttlekit/common/client";
 import type { SandboxContext } from "../sandbox/manager.js";
 
 // Re-export shared types so existing imports keep working
 export {
   ActionSchema,
+  ActionDataSchema,
+  ActionDataValueSchema,
+  PromptActionSchema,
+  UiActionSchema,
   type Action,
+  type ActionData,
+  type PromptAction,
+  type UiAction,
   SessionEventSchema,
   DefineEventSchema,
   PatchEventSchema,
@@ -19,17 +27,30 @@ export {
 } from "@cuttlekit/common/client";
 
 // ============================================================
-// Action Payload Schema (for POST endpoint body — no `type` field)
+// Action Payload Schema (for POST endpoint body — mirrors ActionSchema)
 // ============================================================
 
-export const ActionPayloadSchema = Schema.Struct({
-  prompt: Schema.optional(Schema.String),
-  action: Schema.optional(Schema.String),
-  actionData: Schema.optional(
-    Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-  ),
+export const PromptPayloadSchema = Schema.Struct({
+  type: Schema.Literal("prompt"),
+  prompt: Schema.String,
   model: Schema.optional(Schema.String),
 });
+
+export const UiActionPayloadSchema = Schema.Struct({
+  type: Schema.Literal("action"),
+  action: Schema.String,
+  actionData: Schema.optional(ActionDataSchema),
+  elementId: Schema.optional(Schema.String),
+  elementTag: Schema.optional(Schema.String),
+  hostId: Schema.optional(Schema.String),
+  hostTag: Schema.optional(Schema.String),
+  model: Schema.optional(Schema.String),
+});
+
+export const ActionPayloadSchema = Schema.Union(
+  PromptPayloadSchema,
+  UiActionPayloadSchema,
+);
 
 export type ActionPayload = typeof ActionPayloadSchema.Type;
 

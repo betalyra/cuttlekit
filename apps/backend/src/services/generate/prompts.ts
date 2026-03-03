@@ -1,5 +1,6 @@
 import type { GenerationError } from "./errors.js";
 import type { Patch } from "../vdom/index.js";
+import type { Action } from "@cuttlekit/common/client";
 
 export const MAX_RETRY_ATTEMPTS = 3;
 
@@ -116,3 +117,32 @@ Fix: valid JSONL, one JSON/line, single quotes in HTML attrs${applied}`;
   return `PATCH ERROR "${error.patch.selector}": ${error.reason}
 Fix: selector must exist, use #id only${applied}`;
 };
+
+// Build a compact, LLM-readable description of a single action.
+// Format for UI actions:
+//   increment [button#inc-btn → counter-card#second-counter]
+//   delete [button#del-1 → tr#row-1] {"id":"1"}
+// Format for prompts:
+//   Prompt: "make the button red"
+export const buildActionDescription = (a: Action, index?: number): string => {
+  const prefix = index !== undefined ? `${index + 1}. ` : "";
+  if (a.type === "prompt") return `${prefix}Prompt: ${a.prompt}`;
+
+  const elemStr = a.elementId
+    ? `${a.elementTag ?? "?"}#${a.elementId}`
+    : (a.elementTag ?? "?");
+  const hostStr = a.hostId ? `${a.hostTag ?? "?"}#${a.hostId}` : undefined;
+  const ctx = hostStr ? ` [${elemStr} → ${hostStr}]` : ` [${elemStr}]`;
+  const data =
+    a.actionData && Object.keys(a.actionData).length > 0
+      ? ` ${JSON.stringify(a.actionData)}`
+      : "";
+
+  return `${prefix}${a.action}${ctx}${data}`;
+};
+
+// Build a search query string from a batch of actions (for memory lookup).
+export const buildSearchQuery = (actions: readonly Action[]): string =>
+  actions
+    .map((a) => (a.type === "prompt" ? a.prompt : `user action: ${a.action}`))
+    .join("; ");

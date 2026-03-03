@@ -4,7 +4,7 @@ import { runProcessingLoop } from "./processor.js";
 import { DurableEventLog } from "./event-log.js";
 import { UIService } from "../ui.js";
 import type { ManagedSandbox, SandboxContext } from "../sandbox/manager.js";
-import type { Action, StreamEvent, StreamEventWithOffset } from "./types.js";
+import type { Action, PromptAction, UiAction, StreamEvent, StreamEventWithOffset } from "./types.js";
 
 const makeSandboxCtx = () =>
   Effect.gen(function* () {
@@ -105,7 +105,7 @@ describe("runProcessingLoop", () => {
 
         expect(uiMock.callLog).toHaveLength(1);
         expect(uiMock.callLog[0].actions).toHaveLength(1);
-        expect(uiMock.callLog[0].actions[0].prompt).toBe("build a dashboard");
+        expect((uiMock.callLog[0].actions[0] as PromptAction).prompt).toBe("build a dashboard");
 
         expect(events).toHaveLength(3);
         expect(events[0].type).toBe("session");
@@ -161,9 +161,9 @@ describe("runProcessingLoop", () => {
 
         expect(uiMock.callLog).toHaveLength(1);
         expect(uiMock.callLog[0].actions).toHaveLength(3);
-        expect(uiMock.callLog[0].actions[0].prompt).toBe("add a header");
-        expect(uiMock.callLog[0].actions[1].action).toBe("increment");
-        expect(uiMock.callLog[0].actions[2].prompt).toBe("make it blue");
+        expect((uiMock.callLog[0].actions[0] as PromptAction).prompt).toBe("add a header");
+        expect((uiMock.callLog[0].actions[1] as UiAction).action).toBe("increment");
+        expect((uiMock.callLog[0].actions[2] as PromptAction).prompt).toBe("make it blue");
 
         yield* Fiber.interrupt(fiber);
       })
