@@ -236,11 +236,11 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
             const memoryChange = yield* Ref.get(memoryChangeRef);
             if (memoryChange) {
               const prompts = request.actions
-                .filter((a) => a.type === "prompt" && a.prompt)
-                .map((a) => a.prompt!);
+                .filter((a) => a.type === "prompt")
+                .map((a) => a.prompt);
               const userActions: UserAction[] = request.actions
-                .filter((a) => a.type === "action" && a.action)
-                .map((a) => ({ action: a.action!, data: a.actionData }));
+                .filter((a) => a.type === "action")
+                .map((a) => ({ action: a.action, data: a.actionData }));
 
               yield* memoryService.saveMemory({
                 sessionId,

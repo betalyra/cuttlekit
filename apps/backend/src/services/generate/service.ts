@@ -17,6 +17,8 @@ import {
   MAX_RETRY_ATTEMPTS,
   buildSystemPrompt,
   buildCorrectivePrompt,
+  buildActionDescription,
+  buildSearchQuery,
   safeAsyncIterable,
 } from "./index.js";
 import type { GenerationError } from "./errors.js";
@@ -378,12 +380,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
           });
 
           // Build memory search query from all actions/prompts
-          const searchQueryParts = actions.map((a) =>
-            a.type === "prompt" && a.prompt
-              ? a.prompt
-              : `user action: ${a.action}`,
-          );
-          const searchQuery = searchQueryParts.join("; ");
+          const searchQuery = buildSearchQuery(actions);
 
           // Fetch recent entries and semantic search results
           const [recentEntries, relevantEntries] = yield* Effect.all([
@@ -414,10 +411,12 @@ export class GenerateService extends Effect.Service<GenerateService>()(
           if (recentEntries.length > 0) {
             historyParts.push(
               `[RECENT CHANGES]\n${recentEntries
-                .map(
-                  (e, i) =>
-                    `${i + 1}. ${e.promptSummary ? `"${e.promptSummary}" → ` : ""}${e.changeSummary}`,
-                )
+                .map((e, i) => {
+                  // Negative index: -N for oldest, -1 for most recent (just before [NOW])
+                  const idx = -(recentEntries.length - i);
+                  const summary = e.promptSummary ? `"${e.promptSummary}" → ` : "";
+                  return `${idx}. ${summary}${e.changeSummary}`;
+                })
                 .join("\n")}`,
             );
           }
@@ -434,11 +433,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
 
           // Build current actions (most volatile - goes at end)
           // Lists all batched actions/prompts in chronological order (1 = oldest, N = latest)
-          const actionLines = actions.map((a, i) =>
-            a.type === "prompt" && a.prompt
-              ? `${i + 1}. Prompt: ${a.prompt}`
-              : `${i + 1}. Action: ${a.action} Data: ${JSON.stringify(a.actionData, null, 0)}`,
-          );
+          const actionLines = actions.map((a, i) => buildActionDescription(a, i));
           const actionPart =
             actionLines.length > 0 ? `[NOW]\n${actionLines.join("\n")}` : null;
 
