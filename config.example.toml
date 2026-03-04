@@ -4,7 +4,7 @@ default_model = "gemini-3-flash-preview"
 
 # Model for background operations (e.g. memory summarization).
 # Defaults to default_model if omitted.
-background_model = "gemini-3-flash-preview"
+background_model = "gemini-3.1-flash-lite-preview"
 
 # --- Model Providers ---
 # Each provider needs a matching <PROVIDER>_API_KEY env var.
@@ -14,9 +14,15 @@ background_model = "gemini-3-flash-preview"
 [providers.google.options]
 thinkingConfig = { thinkingLevel = "minimal" }
 
+# Recommended for coding tasks and complex UI changes
 [[providers.google.models]]
 id = "gemini-3-flash-preview"
-label = "Gemini 3 Flash"
+label = "Gemini 3 Flash (best)"
+
+# Recommended for fastest performance
+[[providers.google.models]]
+id = "gemini-3.1-flash-lite-preview"
+label = "Gemini 3.1 Flash Lite (fastest)"
 
 # --- Additional providers (optional) ---
 # Uncomment and add the corresponding API key to use.

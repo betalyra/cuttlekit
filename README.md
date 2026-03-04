@@ -42,7 +42,11 @@ cp .env.example .env
 
 We recommend starting with a **Google Gemini** API key — get one for free at [Google AI Studio](https://aistudio.google.com/welcome). Set `GOOGLE_API_KEY` in your `.env` file. See [.env.example](.env.example) for all options.
 
-For faster but less capable alternatives, you can also configure [Groq](https://console.groq.com/) or [Inception Labs](https://www.inceptionlabs.ai/) — see `config.example.toml` for details.
+The default config includes two Google models:
+- **Gemini 3 Flash** (`gemini-3-flash-preview`) — best for coding tasks and complex UI generation
+- **Gemini 3.1 Flash Lite** (`gemini-3.1-flash-lite-preview`) — fastest, great for quick iterations
+
+You can also configure [Groq](https://console.groq.com/) or [Inception Labs](https://www.inceptionlabs.ai/) as additional providers — see `config.example.toml` for details.
 
 ### 3. Configure models & providers
 
