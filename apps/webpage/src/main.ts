@@ -39,13 +39,19 @@ const renderElement = (el: Element, force = false) => {
   el.innerHTML = interpolate(spec.template, spec.props, el);
   const container = el.querySelector("[data-children]");
   if (container) children.forEach((c) => container.appendChild(c));
+  // Render nested CEs in the freshly created subtree. The outer renderTree
+  // snapshot was taken before this innerHTML mutation, so new child CEs
+  // won't appear in that list and must be handled here.
+  renderTree(el, force);
 };
 
 const renderTree = (root: Element, force = false) => {
   if (registry.size === 0) return;
   const tags = [...registry.keys()];
-  [...root.querySelectorAll("*")]
-    .filter((el) => tags.includes(el.tagName.toLowerCase()))
+  [...root.querySelectorAll(tags.join(","))]
+    // An earlier renderElement in this pass may have detached elements that
+    // were captured in the snapshot — skip them to avoid rendering stale nodes.
+    .filter((el) => el.isConnected)
     .forEach((el) => renderElement(el, force));
 };
 
@@ -128,7 +134,7 @@ const app = {
   },
 
   applyPatch(patch: Patch) {
-    const el = document.querySelector(patch.selector);
+    const el = this.getElements().contentEl.querySelector(patch.selector);
     if (!el) {
       console.warn(`Patch target not found: ${patch.selector}`);
       return;
