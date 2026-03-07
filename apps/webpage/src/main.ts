@@ -7,6 +7,9 @@ const API_BASE = "http://localhost:34512";
 const STORAGE_KEY = "generative-ui-stream";
 const MODEL_STORAGE_KEY = "generative-ui-model";
 
+// Drag & drop state — tracks which data-drag-item is currently being dragged
+let dragSourceId: string | null = null;
+
 type StreamEvent = StreamEventWithOffset;
 
 // ============================================================
@@ -334,6 +337,15 @@ const app = {
     return formData;
   },
 
+  findHost(el: Element): Element | null {
+    let cur = el.parentElement;
+    while (cur) {
+      if (cur.id) return cur;
+      cur = cur.parentElement;
+    }
+    return null;
+  },
+
   triggerAction(actionElement: Element) {
     const action = actionElement.getAttribute("data-action");
     if (!action) return;
@@ -341,16 +353,7 @@ const app = {
     const elementId = actionElement.id || undefined;
     const elementTag = actionElement.tagName.toLowerCase();
 
-    // Find nearest ancestor with an id (the host component/container)
-    const findHost = (el: Element): Element | null => {
-      let cur = el.parentElement;
-      while (cur) {
-        if (cur.id) return cur;
-        cur = cur.parentElement;
-      }
-      return null;
-    };
-    const hostEl = findHost(actionElement);
+    const hostEl = this.findHost(actionElement);
     const hostId = hostEl?.id || undefined;
     const hostTag = hostEl?.tagName.toLowerCase() || undefined;
 
@@ -538,6 +541,47 @@ const app = {
           this.triggerAction(actionButton);
         }
       }
+    });
+
+    // Drag & drop handlers
+    document.addEventListener("dragstart", (e) => {
+      const el = (e.target as HTMLElement).closest("[data-drag-item]");
+      if (!el) return;
+      dragSourceId = el.getAttribute("data-drag-item");
+    });
+
+    document.addEventListener("dragover", (e) => {
+      if ((e.target as HTMLElement).closest("[data-drop-zone]")) {
+        e.preventDefault();
+      }
+    });
+
+    document.addEventListener("drop", (e) => {
+      const captured = dragSourceId;
+      const target = (e.target as HTMLElement).closest("[data-drop-zone]");
+      if (!target || !captured) return;
+      e.preventDefault();
+
+      const droppedOnId =
+        target.getAttribute("data-drag-item") ?? target.id ?? null;
+      const rect = target.getBoundingClientRect();
+      const dropBefore = e.clientY < rect.top + rect.height / 2;
+      const hostEl = this.findHost(target);
+
+      this.submitAction({
+        type: "action",
+        action: "drop",
+        actionData: { draggedId: captured, droppedOnId, dropBefore },
+        elementId: target.id || undefined,
+        elementTag: target.tagName.toLowerCase(),
+        hostId: hostEl?.id,
+        hostTag: hostEl?.tagName.toLowerCase(),
+      });
+      dragSourceId = null;
+    });
+
+    document.addEventListener("dragend", () => {
+      dragSourceId = null;
     });
 
     promptInput.focus();

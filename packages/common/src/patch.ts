@@ -33,10 +33,19 @@ export const applyPatch = (
 ): ApplyPatchResult => {
   // Use getElementById for bare #id selectors to avoid CSS parsing issues
   // with IDs that start with digits (e.g. UUIDs like #65688b32-...)
-  const el =
-    isSimpleIdSelector(patch.selector) && "getElementById" in doc
-      ? (doc as Document).getElementById(patch.selector.slice(1))
-      : doc.querySelector(patch.selector);
+  let el: Element | null;
+  try {
+    el =
+      isSimpleIdSelector(patch.selector) && "getElementById" in doc
+        ? (doc as Document).getElementById(patch.selector.slice(1))
+        : doc.querySelector(patch.selector);
+  } catch (e) {
+    return {
+      _tag: "Error",
+      selector: patch.selector,
+      error: `Invalid selector: ${e instanceof Error ? e.message : String(e)}`,
+    };
+  }
 
   if (!el) {
     return { _tag: "ElementNotFound", selector: patch.selector };
