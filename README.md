@@ -8,7 +8,7 @@
 
 cuttlekit is a generative UI toolkit that generates interactive UIs on the fly using LLMs.
 
-> ⚠️ **Highly experimental** — APIs, config format, and behavior may change at any time. Expect rough edges.
+> ⚠️ **Highly experimental** — Everything may change at any time. Expect rough edges.
 
 
 
@@ -18,7 +18,7 @@ https://github.com/user-attachments/assets/e4c96702-5145-48f4-aada-d9c5e9099190
 
 ## Features
 
-- 🎨 **Generate any UI** — Describe what you need and get a fully interactive interface, no predefined templates
+- 🎨 **Generate any UI** — Describe what you need and get a fully interactive interface, no predefined templates or code.
 - ⚡ **Real-time streaming** — UI updates stream to the browser as the LLM generates them, near-instant feedback
 - 🛠️ **Sandbox code execution** — Integrate with external services and libraries through secure server-side TypeScript execution
 - 🌐 **Multi-model & provider** — Switch between LLM providers and models per request (Google, Groq, etc.)
