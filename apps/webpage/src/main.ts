@@ -563,7 +563,10 @@ const app = {
       e.preventDefault();
 
       const droppedOnId =
-        target.getAttribute("data-drag-item") ?? target.id ?? null;
+        target.getAttribute("data-drag-item") ||
+        target.id ||
+        target.getAttribute("data-drop-zone") ||
+        null;
       const rect = target.getBoundingClientRect();
       const dropBefore = e.clientY < rect.top + rect.height / 2;
       const hostEl = this.findHost(target);
