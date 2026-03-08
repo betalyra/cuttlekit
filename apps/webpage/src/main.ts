@@ -3,7 +3,7 @@ import { loadFontsFromHTML } from "./fonts";
 import { loadIconsFromHTML } from "./icons";
 import type { Action, Patch, StreamEventWithOffset } from "@cuttlekit/common/client";
 
-const API_BASE = "http://localhost:34512";
+const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:34512";
 const STORAGE_KEY = "generative-ui-stream";
 const MODEL_STORAGE_KEY = "generative-ui-model";
 

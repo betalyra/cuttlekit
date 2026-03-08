@@ -97,6 +97,20 @@ pnpm run dev:backend:no-env
 
 Then open http://localhost:5173 🚀
 
+### Docker
+
+Make sure you have a `config.toml` (see step 3) and your env vars ready, then:
+
+```bash
+# With .env file
+docker compose up --build
+
+# With 1Password CLI (or similar secret injectors)
+op run --env-file=.env -- docker compose up --build
+```
+
+Open http://localhost:34513
+
 ## Current Constraints
 
 We're actively working on these:

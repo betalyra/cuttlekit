@@ -1,0 +1,25 @@
+services:
+  backend:
+    build:
+      context: .
+      target: backend
+    ports:
+      - "34512:34512"
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - INCEPTION_API_KEY=${INCEPTION_API_KEY:-}
+      - DENO_API_KEY=${DENO_API_KEY:-}
+      - LINEAR_API_KEY=${LINEAR_API_KEY:-}
+      - NOTION_API_KEY=${NOTION_API_KEY:-}
+    restart: unless-stopped
+
+  webpage:
+    build:
+      context: .
+      target: webpage
+    ports:
+      - "34513:34513"
+    depends_on:
+      - backend
+    restart: unless-stopped
