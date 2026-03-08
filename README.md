@@ -25,6 +25,14 @@ https://github.com/user-attachments/assets/e4c96702-5145-48f4-aada-d9c5e9099190
 - 🧠 **Memory** — Remembers past interactions and patterns across sessions using vector-based semantic recall
 - 🧩 **Framework independent** — Pure HTML + CSS output, no React/Vue/Svelte required on the client
 
+
+## Architecture
+
+<p align="center">
+  <img src="assets/architecture.png" alt="cuttlekit" width="500" />
+</p>
+
+
 ## Getting Started
 
 ### Prerequisites
