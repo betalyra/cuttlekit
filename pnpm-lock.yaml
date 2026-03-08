@@ -3,6 +3,7 @@ lockfileVersion: '9.0'
 settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
+  injectWorkspacePackages: true
 
 overrides:
   vite: npm:rolldown-vite@7.2.5
@@ -134,6 +135,8 @@ importers:
         version: 4.2.1
 
   packages/common: {}
+
+  packages/cuttlekit: {}
 
 packages:
 
