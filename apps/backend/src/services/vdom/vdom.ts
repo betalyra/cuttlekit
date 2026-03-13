@@ -143,7 +143,7 @@ export class VdomService extends Effect.Service<VdomService>()("VdomService", {
         return registry
       })
 
-    const INITIAL_HTML = `<div id="root" class="min-h-screen bg-white text-[#0f172a] flex items-center justify-center"><div class="text-center"><a href="https://cuttlekit.com" target="_blank" rel="noopener"><img src="/logo.svg" alt="cuttlekit" class="h-10 mx-auto mb-4" /></a><p class="text-sm text-[#64748b]" style="font-family:'Space Grotesk',system-ui,sans-serif">Create any UI you like!</p></div></div>`
+    const INITIAL_HTML = `<div id="root" class="min-h-screen bg-white text-[#0f172a] flex items-center justify-center"><div class="text-center"><a href="https://cuttlekit.com" target="_blank" rel="noopener"><img src="https://cuttlekit.com/logo.svg" alt="cuttlekit" class="h-10 mx-auto mb-4" /></a><p class="text-sm text-[#64748b]" style="font-family:'Space Grotesk',system-ui,sans-serif">Create any UI you like!</p></div></div>`
 
     const createSession = (sessionId: string) =>
       Effect.gen(function* () {

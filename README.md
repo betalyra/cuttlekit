@@ -10,10 +10,7 @@ cuttlekit is a generative UI toolkit that generates interactive UIs on the fly u
 
 > ⚠️ **Highly experimental** — Everything may change at any time. Expect rough edges.
 
-
-
 https://github.com/user-attachments/assets/e4c96702-5145-48f4-aada-d9c5e9099190
-
 
 
 ## Features
