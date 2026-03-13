@@ -27,3 +27,7 @@ config.toml
 
 # AI code assistants
 .claude/
+
+
+# Website
+.astro/

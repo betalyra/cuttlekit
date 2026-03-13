@@ -1,0 +1,466 @@
+---
+interface Prompt {
+  text: string;
+  rotate: string;
+}
+
+const prompts: Prompt[] = [
+  { text: "build me a landing page", rotate: "-rotate-1" },
+  { text: "switch to brutalist style", rotate: "rotate-[0.5deg]" },
+  { text: "create an ad visual", rotate: "-rotate-[0.5deg]" },
+  { text: "add a dark mode toggle", rotate: "rotate-1" },
+  { text: "show my Notion data as charts", rotate: "-rotate-[1.5deg]" },
+  { text: "make it mobile-friendly", rotate: "rotate-[0.8deg]" },
+];
+---
+
+<div class="max-w-4xl mx-auto relative">
+  <h2 class="font-display text-5xl md:text-6xl tracking-wide mb-12 text-center rotate-[-0.5deg]">
+    <span class="bg-pink-pop text-white px-5 py-2 inline-block border-4 border-ink shadow-[4px_4px_0_0_#2dd4bf]">TRY IMAGINING THIS</span>
+  </h2>
+
+  <!-- simulated app window -->
+  <div class="showcase-window relative border-4 border-paper/20 bg-[#1a1f2e] shadow-[8px_8px_0_0_#2dd4bf] overflow-hidden">
+    <!-- window chrome -->
+    <div class="flex items-center gap-2 px-4 py-3 bg-[#141820] border-b-2 border-paper/10">
+      <div class="w-3 h-3 rounded-full bg-pink-pop/60"></div>
+      <div class="w-3 h-3 rounded-full bg-amber-pop/60"></div>
+      <div class="w-3 h-3 rounded-full bg-teal/60"></div>
+      <span class="ml-3 text-xs text-paper/30 font-mono">localhost:5173</span>
+    </div>
+
+    <!-- demo stage -->
+    <div class="p-6 min-h-[340px] relative" id="demo-stage">
+
+      <!-- DEFAULT: sales dashboard (auto-animates) -->
+      <div class="demo-ui demo-panel opacity-0" data-demo="default">
+        <div class="demo-el demo-el-1 flex items-center justify-between mb-5">
+          <div class="text-paper font-bold text-lg">Sales Dashboard</div>
+          <div class="text-paper/30 text-xs font-mono">Jan — Feb 2026</div>
+        </div>
+        <div class="demo-el demo-el-2 grid grid-cols-3 gap-3 mb-5">
+          <div class="bg-[#222838] border border-paper/10 rounded-lg p-4">
+            <div class="text-paper/40 text-xs mb-1">Total Bookings</div>
+            <div class="text-teal font-bold text-xl">€438,200</div>
+            <div class="text-teal/60 text-xs mt-1">+21.4%</div>
+          </div>
+          <div class="bg-[#222838] border border-paper/10 rounded-lg p-4">
+            <div class="text-paper/40 text-xs mb-1">Current MRR</div>
+            <div class="text-pink-pop font-bold text-xl">€168,400</div>
+            <div class="text-pink-pop/60 text-xs mt-1">+14.2%</div>
+          </div>
+          <div class="bg-[#222838] border border-paper/10 rounded-lg p-4">
+            <div class="text-paper/40 text-xs mb-1">Expansion</div>
+            <div class="text-cyan-pop font-bold text-xl">27%</div>
+            <div class="text-cyan-pop/60 text-xs mt-1">High</div>
+          </div>
+        </div>
+        <div class="demo-el demo-el-3 grid grid-cols-2 gap-3">
+          <div class="bg-[#222838] border border-paper/10 rounded-lg p-4">
+            <div class="text-paper/40 text-xs mb-3">Customer Segments</div>
+            <div class="space-y-2">
+              <div class="flex items-center gap-2"><div class="h-2 bg-teal rounded-full demo-bar" style="width:46%"></div><span class="text-paper/50 text-xs">Scale-ups 46%</span></div>
+              <div class="flex items-center gap-2"><div class="h-2 bg-pink-pop rounded-full demo-bar" style="width:34%"></div><span class="text-paper/50 text-xs">Startups 34%</span></div>
+              <div class="flex items-center gap-2"><div class="h-2 bg-purple-pop rounded-full demo-bar" style="width:20%"></div><span class="text-paper/50 text-xs">Enterprise 20%</span></div>
+            </div>
+          </div>
+          <div class="bg-[#222838] border border-paper/10 rounded-lg p-4">
+            <div class="text-paper/40 text-xs mb-3">Geographic Mix</div>
+            <div class="space-y-2">
+              <div class="flex items-center gap-2"><div class="h-2 bg-cyan-pop rounded-full demo-bar" style="width:56%"></div><span class="text-paper/50 text-xs">EU & UK 56%</span></div>
+              <div class="flex items-center gap-2"><div class="h-2 bg-amber-pop rounded-full demo-bar" style="width:32%"></div><span class="text-paper/50 text-xs">North America 32%</span></div>
+              <div class="flex items-center gap-2"><div class="h-2 bg-paper/30 rounded-full demo-bar" style="width:12%"></div><span class="text-paper/50 text-xs">Other 12%</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- LANDING PAGE -->
+      <div class="demo-panel hidden" data-demo="build me a landing page" style="opacity:0">
+        <div class="text-center mb-6">
+          <div class="inline-block bg-teal/20 text-teal text-xs font-bold px-3 py-1 rounded-full mb-3">NOW IN BETA</div>
+          <div class="text-paper font-bold text-2xl mb-2">Ship faster with Acme</div>
+          <div class="text-paper/40 text-sm max-w-xs mx-auto">The developer platform that turns ideas into production-ready apps.</div>
+        </div>
+        <div class="flex justify-center gap-3 mb-6">
+          <div class="px-4 py-2 bg-teal text-ink text-sm font-bold rounded-lg">Get Started</div>
+          <div class="px-4 py-2 bg-[#222838] text-paper/70 text-sm rounded-lg border border-paper/10">Watch Demo</div>
+        </div>
+        <div class="grid grid-cols-3 gap-3">
+          <div class="bg-[#222838] border border-paper/10 rounded-lg p-4 text-center">
+            <div class="text-teal font-bold text-xl mb-1">10x</div>
+            <div class="text-paper/40 text-xs">Faster deploys</div>
+          </div>
+          <div class="bg-[#222838] border border-paper/10 rounded-lg p-4 text-center">
+            <div class="text-pink-pop font-bold text-xl mb-1">99.9%</div>
+            <div class="text-paper/40 text-xs">Uptime SLA</div>
+          </div>
+          <div class="bg-[#222838] border border-paper/10 rounded-lg p-4 text-center">
+            <div class="text-cyan-pop font-bold text-xl mb-1">50k+</div>
+            <div class="text-paper/40 text-xs">Developers</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- BRUTALIST STYLE -->
+      <div class="demo-panel hidden" data-demo="switch to brutalist style" style="opacity:0">
+        <div class="border-4 border-paper p-4 mb-4">
+          <div class="text-paper font-bold text-2xl uppercase tracking-widest">ACME CORP.</div>
+        </div>
+        <div class="grid grid-cols-2 gap-0">
+          <div class="border-4 border-paper p-5 bg-pink-pop">
+            <div class="text-ink font-bold text-xl uppercase">Services</div>
+            <div class="text-ink/70 text-sm mt-2 font-mono">WEB / MOBILE / AI</div>
+          </div>
+          <div class="border-4 border-paper border-l-0 p-5 bg-teal">
+            <div class="text-ink font-bold text-xl uppercase">Work</div>
+            <div class="text-ink/70 text-sm mt-2 font-mono">12 PROJECTS</div>
+          </div>
+          <div class="border-4 border-paper border-t-0 p-5 bg-amber-pop">
+            <div class="text-ink font-bold text-xl uppercase">About</div>
+            <div class="text-ink/70 text-sm mt-2 font-mono">EST. 2019</div>
+          </div>
+          <div class="border-4 border-paper border-l-0 border-t-0 p-5 bg-purple-pop">
+            <div class="text-white font-bold text-xl uppercase">Contact</div>
+            <div class="text-white/70 text-sm mt-2 font-mono">SAY HELLO →</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- AD VISUAL -->
+      <div class="demo-panel hidden" data-demo="create an ad visual" style="opacity:0">
+        <div class="relative bg-gradient-to-br from-pink-pop via-purple-pop to-cyan-pop rounded-xl p-8 text-center overflow-hidden">
+          <div class="absolute inset-0 opacity-10" style="background-image: radial-gradient(circle, white 1px, transparent 1px); background-size: 16px 16px;"></div>
+          <div class="relative">
+            <div class="text-white/60 text-xs font-bold tracking-widest mb-2">LIMITED TIME OFFER</div>
+            <div class="text-white font-bold text-3xl mb-2">Summer Sale</div>
+            <div class="text-white font-bold text-6xl mb-3">50% OFF</div>
+            <div class="text-white/70 text-sm mb-5">On all premium plans. Use code SUMMER50.</div>
+            <div class="inline-block px-6 py-3 bg-white text-ink font-bold rounded-lg text-sm">Shop Now →</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- DARK MODE TOGGLE -->
+      <div class="demo-panel hidden" data-demo="add a dark mode toggle" style="opacity:0">
+        <div class="flex items-center justify-between mb-5">
+          <div class="text-paper font-bold text-lg">Settings</div>
+          <div class="flex items-center gap-2">
+            <span class="text-paper/40 text-xs">Dark Mode</span>
+            <div class="w-10 h-5 bg-teal rounded-full relative"><div class="absolute right-0.5 top-0.5 w-4 h-4 bg-white rounded-full shadow"></div></div>
+          </div>
+        </div>
+        <div class="space-y-3">
+          <div class="bg-[#222838] border border-paper/10 rounded-lg p-4 flex items-center justify-between">
+            <div><div class="text-paper text-sm font-bold">Appearance</div><div class="text-paper/40 text-xs mt-1">System theme detected</div></div>
+            <div class="text-teal text-xs font-bold">DARK</div>
+          </div>
+          <div class="bg-[#222838] border border-paper/10 rounded-lg p-4 flex items-center justify-between">
+            <div><div class="text-paper text-sm font-bold">Accent Color</div><div class="text-paper/40 text-xs mt-1">Used for buttons and links</div></div>
+            <div class="flex gap-1.5"><div class="w-5 h-5 rounded-full bg-teal border-2 border-paper"></div><div class="w-5 h-5 rounded-full bg-pink-pop"></div><div class="w-5 h-5 rounded-full bg-purple-pop"></div><div class="w-5 h-5 rounded-full bg-cyan-pop"></div></div>
+          </div>
+          <div class="bg-[#222838] border border-paper/10 rounded-lg p-4 flex items-center justify-between">
+            <div><div class="text-paper text-sm font-bold">Font Size</div><div class="text-paper/40 text-xs mt-1">Adjust text size globally</div></div>
+            <div class="flex items-center gap-2"><div class="px-2 py-0.5 bg-paper/10 rounded text-paper/60 text-xs">A-</div><div class="w-16 h-1.5 bg-paper/10 rounded-full relative"><div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-3 h-3 bg-teal rounded-full"></div></div><div class="px-2 py-0.5 bg-paper/10 rounded text-paper/60 text-xs">A+</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- NOTION CHARTS -->
+      <div class="demo-panel hidden" data-demo="show my Notion data as charts" style="opacity:0">
+        <div class="flex items-center justify-between mb-5">
+          <div class="text-paper font-bold text-lg">Notion → Charts</div>
+          <div class="text-paper/30 text-xs font-mono">synced 2m ago</div>
+        </div>
+        <div class="grid grid-cols-2 gap-3 mb-4">
+          <div class="bg-[#222838] border border-paper/10 rounded-lg p-4">
+            <div class="text-paper/40 text-xs mb-3">Tasks by Status</div>
+            <div class="flex items-end gap-1.5 h-20">
+              <div class="flex-1 bg-teal rounded-t" style="height:85%"></div>
+              <div class="flex-1 bg-amber-pop rounded-t" style="height:45%"></div>
+              <div class="flex-1 bg-pink-pop rounded-t" style="height:30%"></div>
+              <div class="flex-1 bg-purple-pop rounded-t" style="height:60%"></div>
+              <div class="flex-1 bg-cyan-pop rounded-t" style="height:20%"></div>
+            </div>
+            <div class="flex gap-1.5 mt-2">
+              <span class="flex-1 text-center text-paper/30 text-[9px]">Done</span>
+              <span class="flex-1 text-center text-paper/30 text-[9px]">Prog</span>
+              <span class="flex-1 text-center text-paper/30 text-[9px]">Rev</span>
+              <span class="flex-1 text-center text-paper/30 text-[9px]">Plan</span>
+              <span class="flex-1 text-center text-paper/30 text-[9px]">Ice</span>
+            </div>
+          </div>
+          <div class="bg-[#222838] border border-paper/10 rounded-lg p-4">
+            <div class="text-paper/40 text-xs mb-3">Sprint Velocity</div>
+            <div class="flex items-end gap-1.5 h-20">
+              <div class="flex-1 bg-teal/40 rounded-t" style="height:40%"></div>
+              <div class="flex-1 bg-teal/50 rounded-t" style="height:55%"></div>
+              <div class="flex-1 bg-teal/60 rounded-t" style="height:50%"></div>
+              <div class="flex-1 bg-teal/70 rounded-t" style="height:70%"></div>
+              <div class="flex-1 bg-teal/80 rounded-t" style="height:65%"></div>
+              <div class="flex-1 bg-teal rounded-t" style="height:90%"></div>
+            </div>
+            <div class="flex gap-1.5 mt-2">
+              <span class="flex-1 text-center text-paper/30 text-[9px]">W1</span>
+              <span class="flex-1 text-center text-paper/30 text-[9px]">W2</span>
+              <span class="flex-1 text-center text-paper/30 text-[9px]">W3</span>
+              <span class="flex-1 text-center text-paper/30 text-[9px]">W4</span>
+              <span class="flex-1 text-center text-paper/30 text-[9px]">W5</span>
+              <span class="flex-1 text-center text-paper/30 text-[9px]">W6</span>
+            </div>
+          </div>
+        </div>
+        <div class="bg-[#222838] border border-paper/10 rounded-lg p-4">
+          <div class="text-paper/40 text-xs mb-2">Recent Updates</div>
+          <div class="space-y-2">
+            <div class="flex items-center gap-2"><div class="w-2 h-2 bg-teal rounded-full"></div><span class="text-paper/60 text-xs">Homepage redesign — moved to Done</span><span class="text-paper/30 text-xs ml-auto">2h ago</span></div>
+            <div class="flex items-center gap-2"><div class="w-2 h-2 bg-amber-pop rounded-full"></div><span class="text-paper/60 text-xs">API v2 migration — In Progress</span><span class="text-paper/30 text-xs ml-auto">4h ago</span></div>
+            <div class="flex items-center gap-2"><div class="w-2 h-2 bg-pink-pop rounded-full"></div><span class="text-paper/60 text-xs">Auth flow — Needs Review</span><span class="text-paper/30 text-xs ml-auto">1d ago</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- MOBILE FRIENDLY -->
+      <div class="demo-panel hidden" data-demo="make it mobile-friendly" style="opacity:0">
+        <div class="flex justify-center">
+          <div class="w-48 bg-[#222838] border-2 border-paper/20 rounded-2xl p-3 relative">
+            <div class="w-12 h-1 bg-paper/20 rounded-full mx-auto mb-3"></div>
+            <div class="bg-[#1a1f2e] rounded-lg p-3 mb-2">
+              <div class="text-paper font-bold text-xs mb-2">Dashboard</div>
+              <div class="flex gap-1.5 mb-2">
+                <div class="flex-1 bg-teal/20 rounded p-1.5"><div class="text-teal text-[9px] font-bold">€438k</div><div class="text-paper/30 text-[7px]">Revenue</div></div>
+                <div class="flex-1 bg-pink-pop/20 rounded p-1.5"><div class="text-pink-pop text-[9px] font-bold">1,247</div><div class="text-paper/30 text-[7px]">Users</div></div>
+              </div>
+              <div class="h-12 bg-[#222838] rounded p-1.5">
+                <div class="text-paper/30 text-[7px] mb-1">Activity</div>
+                <div class="flex items-end gap-0.5 h-5">
+                  <div class="flex-1 bg-teal/60 rounded-t" style="height:60%"></div>
+                  <div class="flex-1 bg-teal/60 rounded-t" style="height:80%"></div>
+                  <div class="flex-1 bg-teal/60 rounded-t" style="height:40%"></div>
+                  <div class="flex-1 bg-teal rounded-t" style="height:100%"></div>
+                  <div class="flex-1 bg-teal/60 rounded-t" style="height:70%"></div>
+                  <div class="flex-1 bg-teal/60 rounded-t" style="height:50%"></div>
+                  <div class="flex-1 bg-teal/60 rounded-t" style="height:90%"></div>
+                </div>
+              </div>
+            </div>
+            <div class="flex justify-around py-1.5 border-t border-paper/10">
+              <div class="text-teal text-[8px] font-bold">Home</div>
+              <div class="text-paper/30 text-[8px]">Stats</div>
+              <div class="text-paper/30 text-[8px]">Settings</div>
+            </div>
+            <div class="w-8 h-1 bg-paper/20 rounded-full mx-auto mt-2"></div>
+          </div>
+        </div>
+        <div class="text-center mt-4">
+          <div class="text-paper/40 text-xs">Responsive layout auto-generated</div>
+          <div class="flex justify-center gap-3 mt-2">
+            <span class="text-teal text-xs font-bold">375px</span>
+            <span class="text-paper/20 text-xs">|</span>
+            <span class="text-paper/40 text-xs">768px</span>
+            <span class="text-paper/20 text-xs">|</span>
+            <span class="text-paper/40 text-xs">1024px</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- input bar -->
+    <div class="border-t-2 border-paper/10 bg-[#141820] px-4 py-3 flex items-center gap-3">
+      <div class="flex-1 bg-[#222838] border border-paper/10 rounded-lg px-4 py-2.5 text-sm font-mono relative overflow-hidden">
+        <span id="demo-prompt-text" class="demo-prompt text-paper/70"></span>
+        <span class="demo-cursor inline-block w-[2px] h-[1em] bg-teal ml-px align-middle"></span>
+      </div>
+      <div class="demo-send-btn opacity-30 px-4 py-2 bg-teal text-ink text-sm font-bold rounded-lg border-2 border-teal/50">Send</div>
+    </div>
+  </div>
+
+  <!-- prompt pills -->
+  <div class="mt-10 flex flex-wrap justify-center gap-3">
+    {prompts.map((p) => (
+      <button class={`prompt-pill ${p.rotate}`} data-prompt={p.text}>"{p.text}"</button>
+    ))}
+  </div>
+</div>
+
+<script>
+  let typeTimer: ReturnType<typeof setInterval> | null = null;
+
+  function initShowcase() {
+    const pills = document.querySelectorAll<HTMLButtonElement>('.prompt-pill');
+    pills.forEach((pill) => {
+      pill.addEventListener('click', () => handlePillClick(pill));
+    });
+  }
+
+  function handlePillClick(pill: HTMLButtonElement) {
+    const text = pill.dataset.prompt;
+    if (!text) return;
+
+    const promptEl = document.getElementById('demo-prompt-text') as HTMLSpanElement | null;
+    const sendBtn = document.querySelector<HTMLDivElement>('.demo-send-btn');
+    const panels = document.querySelectorAll<HTMLDivElement>('.demo-panel');
+    if (!promptEl || !sendBtn) return;
+
+    // Clear any running type animation
+    if (typeTimer) {
+      clearInterval(typeTimer);
+      typeTimer = null;
+    }
+
+    // Stop CSS animations on default panel
+    const defaultPanel = document.querySelector<HTMLDivElement>('[data-demo="default"]');
+    if (defaultPanel) {
+      defaultPanel.style.animation = 'none';
+      defaultPanel.querySelectorAll<HTMLDivElement>('.demo-el').forEach((e) => { e.style.animation = 'none'; });
+      defaultPanel.querySelectorAll<HTMLDivElement>('.demo-bar').forEach((b) => { b.style.animation = 'none'; });
+    }
+
+    // Hide all panels
+    panels.forEach((p) => {
+      p.style.opacity = '0';
+      p.style.transition = 'none';
+      p.classList.add('hidden');
+    });
+
+    // Find matching panel
+    const target = document.querySelector<HTMLDivElement>(`[data-demo="${text}"]`) ?? defaultPanel;
+    if (!target) return;
+
+    // Reset prompt bar
+    promptEl.style.animation = 'none';
+    promptEl.classList.remove('demo-prompt');
+    promptEl.textContent = '';
+    sendBtn.style.animation = 'none';
+    sendBtn.style.opacity = '0.3';
+
+    // Scroll into view
+    const section = promptEl.closest('section');
+    section?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+    // Type out the prompt letter by letter
+    let i = 0;
+    typeTimer = setInterval(() => {
+      if (i < text.length) {
+        promptEl.textContent += text[i];
+        i++;
+      } else {
+        clearInterval(typeTimer!);
+        typeTimer = null;
+        sendBtn.style.opacity = '1';
+
+        setTimeout(() => {
+          target.classList.remove('hidden');
+          target.offsetHeight; // force reflow
+          target.style.transition = 'opacity 0.5s ease-out';
+          target.style.opacity = '1';
+        }, 400);
+      }
+    }, 45);
+
+    // Highlight active pill
+    document.querySelectorAll('.prompt-pill').forEach((p) => p.classList.remove('prompt-pill-active'));
+    pill.classList.add('prompt-pill-active');
+  }
+
+  initShowcase();
+</script>
+
+<style>
+  /* === PROMPT PILLS === */
+  .prompt-pill {
+    font-family: "Kalam", cursive;
+    font-size: 0.95rem;
+    color: rgba(250, 250, 249, 0.5);
+    border: 2px solid rgba(250, 250, 249, 0.12);
+    padding: 0.4rem 1rem;
+    border-radius: 9999px;
+    transition: all 0.3s;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .prompt-pill:hover {
+    color: #2dd4bf;
+    border-color: rgba(45, 212, 191, 0.4);
+    transform: rotate(0deg) scale(1.05) !important;
+  }
+  .prompt-pill-active {
+    color: #2dd4bf;
+    border-color: #2dd4bf;
+    background: rgba(45, 212, 191, 0.1);
+    transform: rotate(0deg) scale(1.05) !important;
+  }
+
+  /* === SHOWCASE ANIMATIONS === */
+  @keyframes cursor-blink {
+    0%, 49% { opacity: 1; }
+    50%, 100% { opacity: 0; }
+  }
+  .demo-cursor { animation: cursor-blink 0.6s step-end infinite; }
+
+  @keyframes type-prompt {
+    0% { content: ""; }
+    3% { content: "b"; } 5% { content: "bu"; } 7% { content: "bui"; }
+    9% { content: "buil"; } 11% { content: "build"; } 13% { content: "build "; }
+    15% { content: "build m"; } 17% { content: "build me"; } 19% { content: "build me "; }
+    21% { content: "build me a"; } 23% { content: "build me a "; }
+    25% { content: "build me a s"; } 26% { content: "build me a sa"; }
+    27% { content: "build me a sal"; } 28% { content: "build me a sale"; }
+    29% { content: "build me a sales"; } 30% { content: "build me a sales "; }
+    31% { content: "build me a sales d"; } 32% { content: "build me a sales da"; }
+    33% { content: "build me a sales das"; } 34% { content: "build me a sales dash"; }
+    35% { content: "build me a sales dashb"; } 36% { content: "build me a sales dashbo"; }
+    37% { content: "build me a sales dashboa"; } 38% { content: "build me a sales dashboar"; }
+    39% { content: "build me a sales dashboard"; }
+    39%, 85% { content: "build me a sales dashboard"; }
+    95%, 100% { content: ""; }
+  }
+  .demo-prompt::before {
+    content: "";
+    animation: type-prompt 10s linear infinite;
+  }
+
+  @keyframes send-glow {
+    0%, 30% { opacity: 0.3; }
+    35%, 80% { opacity: 1; }
+    90%, 100% { opacity: 0.3; }
+  }
+  .demo-send-btn { animation: send-glow 10s linear infinite; }
+
+  @keyframes ui-appear {
+    0%, 35% { opacity: 0; }
+    40%, 85% { opacity: 1; }
+    92%, 100% { opacity: 0; }
+  }
+  .demo-ui { animation: ui-appear 10s ease-out infinite; }
+
+  @keyframes el-slide-1 {
+    0%, 36% { opacity: 0; transform: translateY(12px); }
+    42%, 85% { opacity: 1; transform: translateY(0); }
+    92%, 100% { opacity: 0; transform: translateY(12px); }
+  }
+  @keyframes el-slide-2 {
+    0%, 42% { opacity: 0; transform: translateY(12px); }
+    50%, 85% { opacity: 1; transform: translateY(0); }
+    92%, 100% { opacity: 0; transform: translateY(12px); }
+  }
+  @keyframes el-slide-3 {
+    0%, 50% { opacity: 0; transform: translateY(12px); }
+    58%, 85% { opacity: 1; transform: translateY(0); }
+    92%, 100% { opacity: 0; transform: translateY(12px); }
+  }
+  .demo-el-1 { animation: el-slide-1 10s ease-out infinite; }
+  .demo-el-2 { animation: el-slide-2 10s ease-out infinite; }
+  .demo-el-3 { animation: el-slide-3 10s ease-out infinite; }
+
+  @keyframes bar-grow {
+    0%, 50% { transform: scaleX(0); }
+    60%, 85% { transform: scaleX(1); }
+    92%, 100% { transform: scaleX(0); }
+  }
+  .demo-bar {
+    transform-origin: left;
+    animation: bar-grow 10s ease-out infinite;
+  }
+</style>

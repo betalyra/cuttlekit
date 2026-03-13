@@ -1,0 +1,101 @@
+---
+title: Introduction
+description: Get started with cuttlekit — a generative UI toolkit that creates interactive UIs on the fly using LLMs.
+---
+
+cuttlekit is a generative UI toolkit that turns natural language into fully interactive user interfaces. Describe what you need, and an LLM builds it — live in your browser, no code required on your end.
+
+No templates. No generated JavaScript. No framework lock-in. Just working HTML + CSS streaming to the browser in real-time.
+
+## What can it do?
+
+- 💬 **Describe → UI** — say what you want, get a working interface
+- ⚡ **Real-time streaming** — watch it build live in the browser
+- 🖱️ **Fully interactive** — buttons, forms, drag & drop — all work
+- 🔄 **Iterate by talking** — refine by describing changes
+- 🔌 **API integrations** — connect to Linear, Notion, and more
+- 🤖 **Multi-model** — Gemini, Groq, or any OpenAI-compatible provider
+- 🧠 **Memory** — remembers past interactions across sessions
+
+## How it works
+
+<div style="display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 1rem; margin: 2rem 0;">
+  <div style="background: #2dd4bf; color: #0f172a; padding: 1.5rem; border: 3px solid #0f172a; box-shadow: 4px 4px 0 0 #0f172a; transform: rotate(-1deg);">
+    <div style="font-size: 1.5rem; font-weight: 800; letter-spacing: 0.05em; margin-bottom: 0.25rem;">YOU</div>
+    <div style="opacity: 0.7; font-style: italic;">"build me a sales dashboard"</div>
+    <div style="margin-top: 0.75rem; display: flex; gap: 0.5rem;">
+      <span style="background: #0f172a; color: #2dd4bf; padding: 0.15rem 0.5rem; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.1em;">TYPE</span>
+      <span style="background: #0f172a; color: #2dd4bf; padding: 0.15rem 0.5rem; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.1em;">CLICK</span>
+      <span style="background: #0f172a; color: #2dd4bf; padding: 0.15rem 0.5rem; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.1em;">DRAG</span>
+    </div>
+  </div>
+
+  <div style="display: flex; flex-direction: column; align-items: center; gap: 0.5rem; padding: 0 0.5rem;">
+    <div style="display: flex; align-items: center; gap: 0.4rem;">
+      <span style="font-size: 0.65rem; font-weight: 700; color: #2dd4bf; letter-spacing: 0.15em;">PROMPT</span>
+      <svg width="60" height="20" viewBox="0 0 60 20"><path d="M0 10h45" stroke="#2dd4bf" stroke-width="2.5" stroke-dasharray="5 3" fill="none"/><path d="M42 5l10 5-10 5" fill="#2dd4bf"/></svg>
+    </div>
+    <div style="display: flex; align-items: center; gap: 0.4rem;">
+      <svg width="60" height="20" viewBox="0 0 60 20"><path d="M12 10h48" stroke="#ec4899" stroke-width="2.5" stroke-dasharray="5 3" fill="none"/><path d="M16 5l-10 5 10 5" fill="#ec4899"/></svg>
+      <span style="font-size: 0.65rem; font-weight: 700; color: #ec4899; letter-spacing: 0.15em;">HTML</span>
+    </div>
+    <div style="display: flex; align-items: center; gap: 0.4rem;">
+      <span style="font-size: 0.65rem; font-weight: 700; color: #22d3ee; letter-spacing: 0.15em;">ACTION</span>
+      <svg width="60" height="20" viewBox="0 0 60 20"><path d="M0 10h45" stroke="#22d3ee" stroke-width="2.5" stroke-dasharray="5 3" fill="none"/><path d="M42 5l10 5-10 5" fill="#22d3ee"/></svg>
+    </div>
+  </div>
+
+  <div style="background: #ec4899; color: white; padding: 1.5rem; border: 3px solid #0f172a; box-shadow: 4px 4px 0 0 #0f172a; transform: rotate(1deg);">
+    <div style="font-size: 1.5rem; font-weight: 800; letter-spacing: 0.05em; margin-bottom: 0.25rem;">AI</div>
+    <div style="opacity: 0.7; font-style: italic;">generates a working UI</div>
+    <div style="margin-top: 0.75rem; display: flex; gap: 0.5rem;">
+      <span style="background: #0f172a; color: #ec4899; padding: 0.15rem 0.5rem; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.1em;">HTML</span>
+      <span style="background: #0f172a; color: #ec4899; padding: 0.15rem 0.5rem; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.1em;">CSS</span>
+      <span style="background: #0f172a; color: #ec4899; padding: 0.15rem 0.5rem; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.1em;">LIVE</span>
+    </div>
+  </div>
+</div>
+
+<div style="text-align: center; opacity: 0.5; font-style: italic; margin-bottom: 2rem;">the loop keeps going — you refine, the AI adapts</div>
+
+Every click, form submission, or drag action is sent to the server. The LLM sees the current page state and generates minimal CSS-selector patches — no full-page re-renders for small changes.
+
+## Quick start
+
+### Running locally
+
+```bash
+git clone https://github.com/betalyra/cuttlekit.git
+cd cuttlekit
+pnpm install
+```
+
+Configure your environment:
+
+```bash
+cp .env.example .env              # add your API keys
+cp config.example.toml config.toml
+```
+
+You'll need at least one model provider API key in `.env`. The easiest way to get started is with [Google AI Studio](https://aistudio.google.com/) — the Gemini API is free to use.
+
+Then start both servers:
+
+```bash
+pnpm run dev:backend    # terminal 1
+pnpm run dev:webpage    # terminal 2
+```
+
+Open [http://localhost:5173](http://localhost:5173) and start describing UIs.
+
+### Running with Docker
+
+```bash
+git clone https://github.com/betalyra/cuttlekit.git
+cd cuttlekit
+cp .env.example .env              # add your API keys
+cp config.example.toml config.toml
+docker compose up --build
+```
+
+Open [http://localhost:34513](http://localhost:34513) and you're ready to go.

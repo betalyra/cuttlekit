@@ -1,0 +1,449 @@
+---
+import ShowcaseDemo from '../components/ShowcaseDemo.astro';
+import CuttlefishLogo from '../components/CuttlefishLogo.astro';
+import '../styles/global.css';
+import logoText from '../assets/logo-text-2.svg';
+---
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+    <link rel="icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <meta name="viewport" content="width=device-width" />
+    <meta name="generator" content={Astro.generator} />
+    <meta name="description" content="cuttlekit — describe what you need, get a fully interactive UI. No templates, no code." />
+    <title>cuttlekit — generative UI toolkit</title>
+  </head>
+  <body class="bg-ink text-paper overflow-x-hidden font-sans selection:bg-teal selection:text-ink">
+
+    <!-- HERO - light background with original black logo -->
+    <section class="relative z-10 bg-paper text-ink overflow-hidden">
+      <!-- pop art dots background -->
+      <div class="absolute inset-0 opacity-[0.06]" style="background-image: radial-gradient(circle, #ec4899 1.5px, transparent 1.5px); background-size: 28px 28px;"></div>
+
+      <!-- pop art bubbles -->
+      <div class="bubble bubble-1"></div>
+      <div class="bubble bubble-2"></div>
+      <div class="bubble bubble-3"></div>
+      <div class="bubble bubble-4"></div>
+      <div class="bubble bubble-5"></div>
+      <div class="bubble bubble-6"></div>
+      <div class="bubble bubble-7"></div>
+
+      <!-- nav -->
+      <nav class="relative z-10 flex items-center justify-between px-6 py-5 max-w-7xl mx-auto">
+        <a href="/" class="hover:opacity-80 transition-opacity">
+          <img src={logoText.src} alt="cuttlekit" class="h-10" />
+        </a>
+        <div class="flex items-center gap-6">
+          <a href="/introduction/" class="text-base text-ink/60 hover:text-teal transition-colors font-bold uppercase tracking-widest">Docs</a>
+          <a href="https://github.com/betalyra/cuttlekit" target="_blank" rel="noopener" class="text-ink/50 hover:text-ink transition-colors" aria-label="GitHub">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
+          </a>
+          <a href="https://discord.gg/ebtwHGcyXR" target="_blank" rel="noopener" class="text-ink/50 hover:text-ink transition-colors" aria-label="Discord">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor"><path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03z"/></svg>
+          </a>
+        </div>
+      </nav>
+
+      <!-- hero content -->
+      <div class="relative z-10 max-w-7xl mx-auto px-6 pt-8 pb-16">
+        <div class="grid md:grid-cols-[1fr_auto] items-center gap-6">
+          <div class="relative">
+            <div class="inline-block -rotate-2 bg-amber-pop text-ink font-display text-sm md:text-base px-4 py-2 border-3 border-ink shadow-[4px_4px_0_0_#0f172a] select-none tracking-widest animate-wiggle mb-5">EXPERIMENTAL</div>
+
+            <h1 class="font-display text-6xl sm:text-7xl md:text-8xl lg:text-[7rem] leading-[0.88] tracking-wide mb-6">
+              <span class="block text-ink">TALK TO IT.</span>
+              <span class="block text-teal -rotate-1 origin-left">IT BUILDS</span>
+              <span class="block text-pink-pop rotate-[0.5deg] origin-left">YOUR UI.</span>
+            </h1>
+
+            <p class="text-lg md:text-xl text-ink/60 max-w-lg mb-10 leading-relaxed font-sans italic">
+              You type what you want. An LLM generates a working UI. Clicks, forms, drag&#8209;and&#8209;drop — all functional, no code on your&nbsp;end.
+            </p>
+
+            <div class="flex flex-wrap gap-5">
+              <a href="https://github.com/betalyra/cuttlekit" target="_blank" rel="noopener"
+                class="inline-flex items-center justify-center gap-3 w-56 py-5 bg-teal text-ink font-display text-xl tracking-wider border-4 border-ink shadow-[6px_6px_0_0_#ec4899] hover:shadow-none hover:translate-x-[6px] hover:translate-y-[6px] transition-all uppercase rotate-[-1deg] hover:rotate-0">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
+                GET STARTED
+              </a>
+              <a href="/introduction/"
+                class="inline-flex items-center justify-center w-56 py-5 bg-pink-pop text-white font-display text-xl tracking-wider border-4 border-ink shadow-[6px_6px_0_0_#0f172a] hover:shadow-none hover:translate-x-[6px] hover:translate-y-[6px] transition-all uppercase rotate-[1deg] hover:rotate-0">
+                READ THE DOCS
+              </a>
+            </div>
+          </div>
+
+          <!-- cuttlefish logo (no text) -->
+          <div class="relative hidden md:block">
+            <div class="absolute inset-0 bg-teal/10 rounded-full blur-[80px] scale-150"></div>
+            <div class="absolute inset-0 bg-pink-pop/5 rounded-full blur-[60px] scale-125 rotate-45"></div>
+            <CuttlefishLogo class="relative w-[400px] lg:w-[500px] drop-shadow-[0_0_40px_rgba(45,212,191,0.2)]" />
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- diagonal to dark -->
+    <div class="relative z-10 h-20 -mb-1 bg-paper" style="background: linear-gradient(172deg, #fafaf9 49.5%, #ec4899 49.5%, #ec4899 51.5%, #2dd4bf 51.5%, #2dd4bf 53.5%, #0f172a 53.5%);"></div>
+
+    <!-- WHAT IS THIS? -->
+    <section class="relative z-10 bg-ink py-24 px-6">
+      <div class="pointer-events-none absolute inset-0 opacity-[0.04]" style="background-image: radial-gradient(circle, #2dd4bf 1.2px, transparent 1.2px); background-size: 18px 18px;"></div>
+      <div class="relative max-w-5xl mx-auto">
+        <h2 class="font-display text-5xl md:text-6xl tracking-wide mb-5 rotate-[-0.5deg]">
+          <span class="bg-teal text-ink px-5 py-2 inline-block border-4 border-ink shadow-[4px_4px_0_0_#ec4899]">WHAT IS THIS?</span>
+        </h2>
+        <p class="text-gray-400 text-xl max-w-2xl mb-20 leading-relaxed">
+          A generative UI toolkit that wires LLMs to a browser. You describe a UI, it builds one. Every button works, every form submits.
+        </p>
+
+        <!-- benefits as comic panels -->
+        <div class="grid md:grid-cols-2 gap-0">
+          <!-- panel 1 -->
+          <div class="border-4 border-paper/20 p-10 bg-ink relative group">
+            <div class="absolute top-3 right-4 font-display text-7xl text-paper/5 select-none">01</div>
+            <div class="relative bg-paper/10 border-3 border-paper/20 rounded-2xl p-5 mb-5 shadow-[4px_4px_0_0_rgba(45,212,191,0.3)] group-hover:shadow-[6px_6px_0_0_rgba(45,212,191,0.4)] transition-shadow">
+              <p class="text-base font-sans italic font-bold text-paper">"Build me a project dashboard with task tracking"</p>
+              <div class="absolute -bottom-3 left-8 w-5 h-5 bg-paper/10 border-b-3 border-r-3 border-paper/20 rotate-45"></div>
+            </div>
+            <h3 class="font-display text-3xl tracking-wide text-teal mt-8">JUST DESCRIBE IT</h3>
+            <p class="text-gray-400 text-base mt-2">Plain language in, working interface out.</p>
+          </div>
+
+          <!-- panel 2 -->
+          <div class="border-4 border-paper/20 border-l-0 p-10 bg-ink relative group">
+            <div class="absolute top-3 right-4 font-display text-7xl text-paper/5 select-none">02</div>
+            <div class="flex flex-col gap-2 mb-5">
+              <div class="flex gap-2">
+                <div class="h-3 bg-teal border-2 border-teal/50 rounded-full animate-pulse-slow" style="width:55%"></div>
+                <div class="h-3 bg-teal/50 border-2 border-teal/30 rounded-full animate-pulse-slow" style="width:35%; animation-delay: 0.2s"></div>
+              </div>
+              <div class="flex gap-2">
+                <div class="h-3 bg-teal/60 border-2 border-teal/40 rounded-full animate-pulse-slow" style="width:40%; animation-delay: 0.4s"></div>
+                <div class="h-3 bg-teal border-2 border-teal/50 rounded-full animate-pulse-slow" style="width:45%; animation-delay: 0.6s"></div>
+              </div>
+            </div>
+            <h3 class="font-display text-3xl tracking-wide text-pink-pop mt-8">WATCH IT APPEAR</h3>
+            <p class="text-gray-400 text-base mt-2">HTML appears as the LLM writes it. You see your UI take shape in&nbsp;real&#8209;time.</p>
+          </div>
+
+          <!-- panel 3 -->
+          <div class="border-4 border-paper/20 border-t-0 p-10 bg-ink relative group">
+            <div class="absolute top-3 right-4 font-display text-7xl text-paper/5 select-none">03</div>
+            <div class="flex gap-3 mb-5">
+              <div class="px-4 py-2 bg-pink-pop text-white text-sm font-bold border-3 border-ink shadow-[3px_3px_0_0_#0f172a] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[1px_1px_0_0_#0f172a] transition-all cursor-pointer animate-bounce-subtle">CLICK</div>
+              <div class="px-4 py-2 bg-purple-pop text-white text-sm font-bold border-3 border-ink shadow-[3px_3px_0_0_#0f172a] animate-bounce-subtle" style="animation-delay: 0.15s">DRAG</div>
+              <div class="px-4 py-2 bg-cyan-pop text-ink text-sm font-bold border-3 border-ink shadow-[3px_3px_0_0_#0f172a] animate-bounce-subtle" style="animation-delay: 0.3s">TYPE</div>
+            </div>
+            <h3 class="font-display text-3xl tracking-wide text-cyan-pop mt-8">FULLY INTERACTIVE</h3>
+            <p class="text-gray-400 text-base mt-2">Not a static mockup. Server handles every interaction — zero JavaScript in the generated&nbsp;output.</p>
+          </div>
+
+          <!-- panel 4 -->
+          <div class="border-4 border-paper/20 border-t-0 border-l-0 p-10 bg-ink relative group">
+            <div class="absolute top-3 right-4 font-display text-7xl text-paper/5 select-none">04</div>
+            <div class="relative bg-paper/10 border-3 border-paper/20 rounded-2xl p-5 mb-5 shadow-[4px_4px_0_0_rgba(217,70,239,0.3)] group-hover:shadow-[6px_6px_0_0_rgba(217,70,239,0.4)] transition-shadow">
+              <p class="text-base font-sans italic font-bold text-paper">"Make the sidebar wider. Add a dark mode."</p>
+              <div class="absolute -bottom-3 left-8 w-5 h-5 bg-paper/10 border-b-3 border-r-3 border-paper/20 rotate-45"></div>
+            </div>
+            <h3 class="font-display text-3xl tracking-wide text-purple-pop mt-8">ITERATE NATURALLY</h3>
+            <p class="text-gray-400 text-base mt-2">Refine by talking. The LLM sees what's on screen and updates it.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- HOW IT WORKS - architecture schematic -->
+    <section class="relative z-10 bg-ink px-6 py-20 overflow-hidden">
+      <div class="max-w-5xl mx-auto">
+        <h2 class="font-display text-5xl md:text-6xl tracking-wide mb-16 text-center rotate-[0.5deg]">
+          <span class="bg-pink-pop text-white px-5 py-2 inline-block border-4 border-ink shadow-[4px_4px_0_0_#2dd4bf]">HOW IT WORKS</span>
+        </h2>
+
+        <!-- architecture as comic-style flow -->
+        <div class="relative border-4 border-paper/20 bg-ink p-8 md:p-12">
+          <!-- halftone bg -->
+          <div class="absolute inset-0 opacity-[0.03]" style="background-image: radial-gradient(circle, #2dd4bf 1px, transparent 1px); background-size: 14px 14px;"></div>
+
+          <div class="relative grid md:grid-cols-[1fr_auto_1fr] items-center gap-6 md:gap-4">
+            <!-- YOU card -->
+            <div class="bg-teal text-ink p-8 border-4 border-ink shadow-[6px_6px_0_0_#0f172a] -rotate-2 hover:rotate-0 transition-transform">
+              <div class="font-display text-4xl md:text-5xl tracking-wide mb-2">YOU</div>
+              <p class="font-sans italic text-ink/70 text-lg">"build me a sales dashboard"</p>
+              <div class="mt-4 flex gap-2">
+                <span class="px-3 py-1 bg-ink text-teal text-xs font-display tracking-wider border-2 border-ink">TYPE</span>
+                <span class="px-3 py-1 bg-ink text-teal text-xs font-display tracking-wider border-2 border-ink">CLICK</span>
+                <span class="px-3 py-1 bg-ink text-teal text-xs font-display tracking-wider border-2 border-ink">DRAG</span>
+              </div>
+            </div>
+
+            <!-- arrows in the middle -->
+            <div class="hidden md:flex flex-col items-center gap-4 px-4">
+              <!-- prompt arrow right -->
+              <div class="flex items-center gap-2">
+                <span class="font-display text-xs text-teal tracking-widest rotate-0">PROMPT</span>
+                <svg width="80" height="24" viewBox="0 0 80 24"><path d="M0 12h65" stroke="#2dd4bf" stroke-width="3" stroke-dasharray="6 4" fill="none"/><path d="M60 6l12 6-12 6" fill="#2dd4bf"/></svg>
+              </div>
+              <!-- html arrow left -->
+              <div class="flex items-center gap-2">
+                <svg width="80" height="24" viewBox="0 0 80 24"><path d="M15 12h65" stroke="#ec4899" stroke-width="3" stroke-dasharray="6 4" fill="none"/><path d="M20 6l-12 6 12 6" fill="#ec4899"/></svg>
+                <span class="font-display text-xs text-pink-pop tracking-widest">HTML</span>
+              </div>
+              <!-- action arrow right -->
+              <div class="flex items-center gap-2">
+                <span class="font-display text-xs text-cyan-pop tracking-widest">ACTION</span>
+                <svg width="80" height="24" viewBox="0 0 80 24"><path d="M0 12h65" stroke="#22d3ee" stroke-width="3" stroke-dasharray="6 4" fill="none"/><path d="M60 6l12 6-12 6" fill="#22d3ee"/></svg>
+              </div>
+            </div>
+            <!-- mobile arrows -->
+            <div class="md:hidden flex justify-center gap-6">
+              <div class="flex flex-col items-center">
+                <span class="font-display text-xs text-teal tracking-widest mb-1">PROMPT</span>
+                <svg width="24" height="40" viewBox="0 0 24 40"><path d="M12 0v30" stroke="#2dd4bf" stroke-width="3" stroke-dasharray="6 4" fill="none"/><path d="M6 25l6 12 6-12" fill="#2dd4bf"/></svg>
+              </div>
+              <div class="flex flex-col items-center">
+                <svg width="24" height="40" viewBox="0 0 24 40"><path d="M12 10v30" stroke="#ec4899" stroke-width="3" stroke-dasharray="6 4" fill="none"/><path d="M6 15l6-12 6 12" fill="#ec4899"/></svg>
+                <span class="font-display text-xs text-pink-pop tracking-widest mt-1">HTML</span>
+              </div>
+            </div>
+
+            <!-- AI card -->
+            <div class="bg-pink-pop text-white p-8 border-4 border-ink shadow-[6px_6px_0_0_#0f172a] rotate-2 hover:rotate-0 transition-transform">
+              <div class="font-display text-4xl md:text-5xl tracking-wide mb-2">AI</div>
+              <p class="font-sans italic text-white/70 text-lg">generates a working UI</p>
+              <div class="mt-4 flex gap-2">
+                <span class="px-3 py-1 bg-ink text-pink-pop text-xs font-display tracking-wider border-2 border-ink">HTML</span>
+                <span class="px-3 py-1 bg-ink text-pink-pop text-xs font-display tracking-wider border-2 border-ink">CSS</span>
+                <span class="px-3 py-1 bg-ink text-pink-pop text-xs font-display tracking-wider border-2 border-ink">LIVE</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- bottom tagline -->
+          <div class="relative text-center mt-8">
+            <p class="font-sans italic text-lg text-paper/40">the loop keeps going — you refine, the AI adapts. like a cuttlefish changing shape.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SHOWCASE DEMO ANIMATION -->
+    <section class="relative z-10 bg-ink px-6 pb-8 pt-16">
+      <!-- aqua bubbles in dark section -->
+      <div class="bubble-dark bubble-d1"></div>
+      <div class="bubble-dark bubble-d2"></div>
+      <div class="bubble-dark bubble-d3"></div>
+      <div class="bubble-dark bubble-d4"></div>
+      <div class="bubble-dark bubble-d5"></div>
+
+      <ShowcaseDemo />
+    </section>
+
+    <!-- diagonal to light -->
+    <div class="relative z-10 h-20 -mb-1 bg-ink" style="background: linear-gradient(172deg, #0f172a 49.5%, #2dd4bf 49.5%, #2dd4bf 51.5%, #ec4899 51.5%, #ec4899 53.5%, #fafaf9 53.5%);"></div>
+
+    <!-- CAPABILITIES - light section, sticker style -->
+    <section class="relative z-10 bg-paper text-ink py-24 px-6 overflow-hidden">
+      <div class="absolute inset-0 opacity-[0.04]" style="background-image: radial-gradient(circle, #d946ef 1.2px, transparent 1.2px); background-size: 22px 22px;"></div>
+      <div class="relative max-w-6xl mx-auto">
+        <h2 class="font-display text-5xl md:text-6xl tracking-wide mb-20 text-center rotate-[-0.5deg]">
+          <span class="bg-ink text-teal px-5 py-2 inline-block border-4 border-ink shadow-[4px_4px_0_0_#ec4899]">UNDER THE HOOD</span>
+        </h2>
+
+        <div class="flex flex-wrap justify-center gap-8 md:gap-10">
+
+          <div class="rotate-[-3deg] hover:rotate-0 hover:scale-105 transition-all duration-300 bg-teal text-ink p-8 border-4 border-ink shadow-[6px_6px_0_0_#0f172a] max-w-[300px]">
+            <h3 class="font-display text-2xl tracking-wide mb-3">INSTANT UPDATES</h3>
+            <p class="text-ink/70 text-base leading-relaxed">No build step, no deployment. Describe a change and it just runs — right in the browser.</p>
+          </div>
+
+          <div class="rotate-[2deg] hover:rotate-0 hover:scale-105 transition-all duration-300 bg-pink-pop text-white p-8 border-4 border-ink shadow-[6px_6px_0_0_#0f172a] max-w-[300px] mt-10">
+            <h3 class="font-display text-2xl tracking-wide mb-3">IT REMEMBERS YOU</h3>
+            <p class="text-white/80 text-base leading-relaxed">Vector-based memory across sessions. Knows what you built before and how you like things.</p>
+          </div>
+
+          <div class="rotate-[-1deg] hover:rotate-0 hover:scale-105 transition-all duration-300 bg-cyan-pop text-ink p-8 border-4 border-ink shadow-[6px_6px_0_0_#0f172a] max-w-[300px]">
+            <h3 class="font-display text-2xl tracking-wide mb-3">CONNECTS TO APIs</h3>
+            <p class="text-ink/70 text-base leading-relaxed">Connect to Linear, Notion, or any external API. Fast code execution in secure sandboxes.</p>
+          </div>
+
+          <div class="rotate-[3deg] hover:rotate-0 hover:scale-105 transition-all duration-300 bg-purple-pop text-white p-8 border-4 border-ink shadow-[6px_6px_0_0_#0f172a] max-w-[300px] mt-6">
+            <h3 class="font-display text-2xl tracking-wide mb-3">PICK YOUR MODEL</h3>
+            <p class="text-white/80 text-base leading-relaxed">Use with any model provider. Gemini, Groq, OpenAI, or bring your own.</p>
+          </div>
+
+          <div class="rotate-[-2deg] hover:rotate-0 hover:scale-105 transition-all duration-300 bg-amber-pop text-ink p-8 border-4 border-ink shadow-[6px_6px_0_0_#0f172a] max-w-[300px] mt-3">
+            <h3 class="font-display text-2xl tracking-wide mb-3">WORKS EVERYWHERE</h3>
+            <p class="text-ink/70 text-base leading-relaxed">Output is plain HTML + CSS. No React, no Vue, no build step for generated content.</p>
+          </div>
+
+          <div class="rotate-[1deg] hover:rotate-0 hover:scale-105 transition-all duration-300 bg-paper text-ink p-8 border-4 border-ink shadow-[6px_6px_0_0_#2dd4bf] max-w-[300px] mt-8">
+            <h3 class="font-display text-2xl tracking-wide mb-3">SOURCE AVAILABLE</h3>
+            <p class="text-ink/70 text-base leading-relaxed">Free for personal and internal use. Commercial license if you're offering it as a hosted service.</p>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- diagonal to dark -->
+    <div class="relative z-10 h-20 -mt-1 bg-paper" style="background: linear-gradient(172deg, #fafaf9 49.5%, #0f172a 49.5%);"></div>
+
+    <!-- quickstart -->
+    <section class="relative z-10 bg-ink px-6 pb-24 pt-8">
+      <div class="max-w-4xl mx-auto">
+        <h2 class="font-display text-5xl md:text-6xl tracking-wide mb-12 text-center rotate-[0.5deg]">
+          <span class="bg-teal text-ink px-5 py-2 inline-block border-4 border-ink shadow-[4px_4px_0_0_#ec4899]">GET STARTED</span>
+        </h2>
+      </div>
+      <div class="bg-ink border-4 border-teal p-10 shadow-[8px_8px_0_0_#ec4899] relative max-w-4xl mx-auto">
+        <div class="absolute -top-5 left-6 bg-teal text-ink font-display text-sm px-4 py-1.5 border-3 border-ink tracking-wider">QUICK START</div>
+        <pre class="text-base md:text-lg text-gray-300 overflow-x-auto font-mono leading-loose"><code><span class="text-gray-500">$</span> <span class="text-teal">git clone</span> https://github.com/betalyra/cuttlekit.git
+
+<span class="text-gray-500">$</span> <span class="text-teal">pnpm install</span>
+<span class="text-gray-500">$</span> <span class="text-teal">cp</span> .env.example .env       <span class="text-gray-500"># configure your API keys</span>
+<span class="text-gray-500">$</span> <span class="text-teal">cp</span> config.example.toml config.toml  <span class="text-gray-500"># cp configuration or edit</span>
+<span class="text-gray-500">$</span> <span class="text-teal">pnpm run</span> dev:backend <span class="text-gray-500">&</span> <span class="text-teal">pnpm run</span> dev:webpage</code></pre>
+      </div>
+    </section>
+
+
+    <!-- footer -->
+    <footer class="relative z-10 bg-teal text-ink border-t-4 border-ink py-8 px-6">
+      <div class="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+        <div class="flex items-center gap-3">
+          <span class="font-display text-2xl tracking-wide">cuttlekit</span>
+          <span class="text-ink/50 text-base font-bold">by Betalyra</span>
+          <span class="text-ink/30 text-sm font-sans italic hidden md:inline">— adapt like a cuttlefish</span>
+        </div>
+        <div class="flex items-center gap-8 font-display text-base tracking-wider">
+          <a href="https://github.com/betalyra/cuttlekit" target="_blank" rel="noopener" class="hover:text-pink-pop transition-colors border-b-2 border-ink/30 hover:border-pink-pop">GitHub</a>
+          <a href="https://discord.gg/ebtwHGcyXR" target="_blank" rel="noopener" class="hover:text-pink-pop transition-colors border-b-2 border-ink/30 hover:border-pink-pop">Discord</a>
+          <a href="/introduction/" class="hover:text-pink-pop transition-colors border-b-2 border-ink/30 hover:border-pink-pop">Docs</a>
+        </div>
+        <div class="flex items-center gap-6 text-xs text-ink/30 mt-4 md:mt-0">
+          <a href="https://betalyra.com/imprint" target="_blank" rel="noopener" class="hover:text-ink/60 transition-colors">Imprint</a>
+          <a href="https://betalyra.com/privacy" target="_blank" rel="noopener" class="hover:text-ink/60 transition-colors">Privacy</a>
+          <a href="https://betalyra.com/contact" target="_blank" rel="noopener" class="hover:text-ink/60 transition-colors">Contact</a>
+        </div>
+      </div>
+    </footer>
+
+    <style>
+      /* === GENERAL ANIMATIONS === */
+      @keyframes wiggle {
+        0%, 100% { transform: rotate(-6deg); }
+        25% { transform: rotate(-4deg); }
+        75% { transform: rotate(-8deg); }
+      }
+      .animate-wiggle { animation: wiggle 3s ease-in-out infinite; }
+
+      @keyframes float {
+        0%, 100% { transform: rotate(5deg) translateY(0); }
+        50% { transform: rotate(5deg) translateY(-6px); }
+      }
+      .animate-float { animation: float 4s ease-in-out infinite; }
+
+      @keyframes float-delayed {
+        0%, 100% { transform: rotate(-10deg) translateY(0); }
+        50% { transform: rotate(-10deg) translateY(-8px); }
+      }
+      .animate-float-delayed { animation: float-delayed 5s ease-in-out infinite; }
+
+      @keyframes bounce-subtle {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-3px); }
+      }
+      .animate-bounce-subtle { animation: bounce-subtle 2s ease-in-out infinite; }
+
+      @keyframes pulse-slow {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+      }
+      .animate-pulse-slow { animation: pulse-slow 2.5s ease-in-out infinite; }
+
+      /* === CUTTLEFISH CHROMATOPHORE ANIMATIONS === */
+      @keyframes chromo-fin-1 {
+        0%, 100% { fill: #2dd4bf; }
+        33% { fill: #ec4899; }
+        66% { fill: #22d3ee; }
+      }
+      @keyframes chromo-fin-2 {
+        0%, 100% { fill: #2dd4bf; }
+        33% { fill: #d946ef; }
+        66% { fill: #f59e0b; }
+      }
+      @keyframes chromo-arm-teal {
+        0%, 100% { fill: #2dd4bf; }
+        33% { fill: #22d3ee; }
+        66% { fill: #ec4899; }
+      }
+      .cuttlefish-fin-1 { animation: chromo-fin-1 14s ease-in-out infinite; }
+      .cuttlefish-fin-2 { animation: chromo-fin-2 18s ease-in-out infinite; }
+      .cuttlefish-arm-teal { animation: chromo-arm-teal 16s ease-in-out infinite; }
+      /* gradient arms get a subtle hue rotation */
+      .cuttlefish-arm-a { animation: chromo-hue-a 20s ease-in-out infinite; }
+      .cuttlefish-arm-b { animation: chromo-hue-b 24s ease-in-out infinite; }
+      .cuttlefish-arm-c { animation: chromo-hue-c 18s ease-in-out infinite; }
+      .cuttlefish-arm-d { animation: chromo-hue-d 22s ease-in-out infinite; }
+      @keyframes chromo-hue-a { 0%, 100% { filter: hue-rotate(0deg); } 50% { filter: hue-rotate(25deg); } }
+      @keyframes chromo-hue-b { 0%, 100% { filter: hue-rotate(0deg); } 50% { filter: hue-rotate(-20deg); } }
+      @keyframes chromo-hue-c { 0%, 100% { filter: hue-rotate(0deg); } 50% { filter: hue-rotate(35deg); } }
+      @keyframes chromo-hue-d { 0%, 100% { filter: hue-rotate(0deg); } 50% { filter: hue-rotate(-25deg); } }
+
+      /* color shift for text */
+      @keyframes color-shift {
+        0%, 100% { color: #2dd4bf; }
+        25% { color: #ec4899; }
+        50% { color: #d946ef; }
+        75% { color: #22d3ee; }
+      }
+      .color-shift { animation: color-shift 8s ease-in-out infinite; }
+
+      /* === POP ART AQUA BUBBLES (light sections) === */
+      @keyframes bubble-rise {
+        0% { transform: translateY(0) scale(1); opacity: 0.15; }
+        50% { opacity: 0.25; }
+        100% { transform: translateY(-120vh) scale(1.2); opacity: 0; }
+      }
+      .bubble {
+        position: absolute;
+        border-radius: 50%;
+        border: 3px solid;
+        pointer-events: none;
+        z-index: 1;
+        animation: bubble-rise linear infinite;
+      }
+      .bubble-1 { width: 40px; height: 40px; left: 5%; bottom: -40px; border-color: #2dd4bf; background: rgba(45,212,191,0.08); animation-duration: 12s; animation-delay: 0s; }
+      .bubble-2 { width: 24px; height: 24px; left: 15%; bottom: -24px; border-color: #ec4899; background: rgba(236,72,153,0.08); animation-duration: 15s; animation-delay: 2s; }
+      .bubble-3 { width: 56px; height: 56px; left: 75%; bottom: -56px; border-color: #22d3ee; background: rgba(34,211,238,0.06); animation-duration: 18s; animation-delay: 4s; }
+      .bubble-4 { width: 32px; height: 32px; left: 88%; bottom: -32px; border-color: #d946ef; background: rgba(217,70,239,0.08); animation-duration: 14s; animation-delay: 1s; }
+      .bubble-5 { width: 20px; height: 20px; left: 45%; bottom: -20px; border-color: #2dd4bf; background: rgba(45,212,191,0.1); animation-duration: 16s; animation-delay: 6s; }
+      .bubble-6 { width: 48px; height: 48px; left: 60%; bottom: -48px; border-color: #ec4899; background: rgba(236,72,153,0.06); animation-duration: 20s; animation-delay: 3s; }
+      .bubble-7 { width: 16px; height: 16px; left: 30%; bottom: -16px; border-color: #f59e0b; background: rgba(245,158,11,0.1); animation-duration: 11s; animation-delay: 5s; }
+
+      /* === AQUA BUBBLES (dark sections) === */
+      .bubble-dark {
+        position: absolute;
+        border-radius: 50%;
+        border: 2px solid;
+        pointer-events: none;
+        z-index: 1;
+        animation: bubble-rise linear infinite;
+      }
+      .bubble-d1 { width: 36px; height: 36px; left: 8%; bottom: -36px; border-color: rgba(45,212,191,0.3); background: rgba(45,212,191,0.05); animation-duration: 14s; animation-delay: 1s; }
+      .bubble-d2 { width: 20px; height: 20px; left: 92%; bottom: -20px; border-color: rgba(34,211,238,0.3); background: rgba(34,211,238,0.05); animation-duration: 17s; animation-delay: 3s; }
+      .bubble-d3 { width: 44px; height: 44px; left: 50%; bottom: -44px; border-color: rgba(236,72,153,0.2); background: rgba(236,72,153,0.03); animation-duration: 20s; animation-delay: 0s; }
+      .bubble-d4 { width: 14px; height: 14px; left: 25%; bottom: -14px; border-color: rgba(217,70,239,0.3); background: rgba(217,70,239,0.05); animation-duration: 12s; animation-delay: 5s; }
+      .bubble-d5 { width: 28px; height: 28px; left: 70%; bottom: -28px; border-color: rgba(45,212,191,0.25); background: rgba(45,212,191,0.04); animation-duration: 16s; animation-delay: 2s; }
+
+    </style>
+
+  </body>
+</html>

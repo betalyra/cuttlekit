@@ -1,0 +1,52 @@
+@import "tailwindcss";
+@import "@fontsource/space-grotesk/400.css";
+@import "@fontsource/space-grotesk/500.css";
+@import "@fontsource/space-grotesk/700.css";
+@import "@fontsource/bangers/400.css";
+@import "@fontsource/kalam/400.css";
+@import "@fontsource/kalam/700.css";
+
+@theme {
+  --font-sans: "Space Grotesk", system-ui, sans-serif;
+  --font-display: "Bangers", cursive;
+  --font-handwritten: "Kalam", cursive;
+
+  --color-teal: #2dd4bf;
+  --color-slate-dark: #475569;
+  --color-pink-pop: #ec4899;
+  --color-cyan-pop: #22d3ee;
+  --color-purple-pop: #d946ef;
+  --color-amber-pop: #f59e0b;
+  --color-ink: #0f172a;
+  --color-paper: #fafaf9;
+}
+
+/* Override Starlight theme to match cuttlekit branding */
+:root {
+  --sl-font: "Space Grotesk", system-ui, sans-serif;
+  --sl-color-accent-low: #134e4a;
+  --sl-color-accent: #2dd4bf;
+  --sl-color-accent-high: #ccfbf1;
+  --sl-color-white: #fafaf9;
+  --sl-color-gray-1: #e2e8f0;
+  --sl-color-gray-2: #94a3b8;
+  --sl-color-gray-3: #64748b;
+  --sl-color-gray-4: #334155;
+  --sl-color-gray-5: #1e293b;
+  --sl-color-gray-6: #0f172a;
+  --sl-color-black: #020617;
+}
+
+:root[data-theme="light"] {
+  --sl-color-accent-low: #ccfbf1;
+  --sl-color-accent: #0d9488;
+  --sl-color-accent-high: #134e4a;
+  --sl-color-white: #020617;
+  --sl-color-gray-1: #1e293b;
+  --sl-color-gray-2: #334155;
+  --sl-color-gray-3: #64748b;
+  --sl-color-gray-4: #94a3b8;
+  --sl-color-gray-5: #e2e8f0;
+  --sl-color-gray-6: #f8fafc;
+  --sl-color-black: #fafaf9;
+}
