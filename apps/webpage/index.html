@@ -2,19 +2,30 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <link rel="icon" type="image/svg+xml" href="/logo.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Generative UI</title>
+    <title>cuttlekit</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
     <script src="https://cdn.tailwindcss.com"></script>
   </head>
   <body>
-    <div id="app" class="min-h-screen pb-16 bg-[#fafafa]">
-      <div id="loading" class="flex items-center justify-center min-h-screen">
-        <div class="text-xl text-[#0a0a0a]">Generating...</div>
+    <div id="app" class="min-h-screen pb-16 bg-white">
+      <div
+        id="loading"
+        class="flex items-center justify-center min-h-screen"
+      >
+        <div class="text-xl text-[#64748b]" style="font-family: 'Space Grotesk', sans-serif">
+          Generating...
+        </div>
       </div>
 
       <div id="error" class="hidden items-center justify-center min-h-screen">
-        <div class="text-red-500">
+        <div class="text-red-500" style="font-family: 'Space Grotesk', sans-serif">
           <p>Error: <span></span></p>
         </div>
       </div>
@@ -22,10 +33,11 @@
       <div id="content"></div>
     </div>
 
-    <!-- Fixed footer - always present escape hatch -->
+    <!-- Fixed footer -->
     <footer
       id="prompt-footer"
-      class="fixed bottom-0 left-0 right-0 bg-[#fafafa] border-t border-[#e5e5e5] px-4 py-2 z-50"
+      class="fixed bottom-0 left-0 right-0 bg-[#0f172a] border-t-2 border-[#1e293b] px-4 py-2 z-50"
+      style="font-family: 'Space Grotesk', sans-serif"
     >
       <div class="max-w-4xl mx-auto flex flex-col gap-1">
         <div class="flex gap-2 items-center">
@@ -33,30 +45,30 @@
             type="text"
             id="prompt-input"
             placeholder="Describe what to create or change..."
-            class="flex-1 px-3 py-2.5 text-base bg-white border border-[#d4d4d4] rounded focus:outline-none focus:border-[#0a0a0a] text-[#0a0a0a] placeholder-[#a3a3a3]"
+            class="flex-1 px-3 py-2.5 text-base bg-[#1e293b] border-2 border-[#334155] rounded-none focus:outline-none focus:border-[#2dd4bf] text-[#e2e8f0] placeholder-[#64748b]"
           />
           <button
             id="send-btn"
-            class="px-4 py-2.5 text-sm bg-[#0a0a0a] text-white rounded hover:bg-[#262626] transition-colors"
+            class="px-4 py-2.5 text-sm font-medium bg-[#2dd4bf] text-[#0f172a] rounded-none hover:bg-[#5eead4] transition-colors border-2 border-[#2dd4bf]"
           >
             Send
           </button>
           <button
             id="reset-btn"
-            class="px-3 py-2.5 text-sm bg-white border border-[#d4d4d4] text-[#525252] rounded hover:bg-[#f5f5f5] transition-colors"
+            class="px-3 py-2.5 text-sm font-medium bg-transparent border-2 border-[#334155] text-[#94a3b8] rounded-none hover:border-[#64748b] hover:text-[#e2e8f0] transition-colors"
           >
             Reset
           </button>
           <select
             id="model-select"
-            class="px-2 py-2.5 text-xs border border-[#d4d4d4] bg-white text-[#525252] rounded"
+            class="px-2 py-2.5 text-xs border-2 border-[#334155] bg-[#1e293b] text-[#94a3b8] rounded-none"
           >
             <option value="">Loading...</option>
           </select>
         </div>
         <div
           id="footer-stats"
-          class="hidden items-center gap-1 text-[10px] text-[#a3a3a3] font-mono"
+          class="hidden items-center gap-1 text-[10px] text-[#64748b] font-mono"
         ></div>
       </div>
     </footer>
