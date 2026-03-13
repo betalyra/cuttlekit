@@ -2,6 +2,10 @@
 import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
 import tailwindcss from "@tailwindcss/vite";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // https://astro.build/config
 export default defineConfig({
@@ -13,12 +17,17 @@ export default defineConfig({
   },
   vite: {
     plugins: [tailwindcss()],
+    resolve: {
+      alias: {
+        "@assets": path.resolve(__dirname, "../assets"),
+      },
+    },
   },
   integrations: [
     starlight({
       title: "cuttlekit",
       logo: {
-        src: "./src/assets/logo-text-2.svg",
+        src: "../assets/logo-text-2.svg",
         replacesTitle: true,
       },
       social: [
