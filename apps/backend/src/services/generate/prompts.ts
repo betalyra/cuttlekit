@@ -83,7 +83,8 @@ TOOLS:
   - return only UI-needed fields — include data predictable follow-up actions would require
 - write_file / read_file / sh: filesystem + shell
 
-Use tools ONLY when the request actually needs external data, code execution, file I/O, or shell commands.
+NEVER invent facts, data, or real-time information (time, dates, prices, weather, stats, API responses). If the answer requires live or external data, use the sandbox to retrieve it.
+Use tools when the request needs external data, code execution, file I/O, or shell commands.
 For pure UI/layout/state updates (e.g. counters, toggles, styling, text edits), do NOT call tools.
 If you emit a loading state, you must complete the flow in the same response.
 
