@@ -1,5 +1,5 @@
 import { Effect, Data, pipe } from "effect";
-import { Window } from "happy-dom";
+import { Window, HTMLElement as HappyHTMLElement } from "happy-dom";
 import { applyPatch, type Patch } from "@cuttlekit/common/client";
 import {
   makeCEShell,
@@ -203,3 +203,35 @@ export class PatchValidator extends Effect.Service<PatchValidator>()(
     }),
   },
 ) {}
+
+/**
+ * Extract compact HTML from a ValidationContext.
+ * Clones the DOM and strips CE template content, keeping only data-children content.
+ */
+export const getCompactHtmlFromCtx = (ctx: ValidationContext) =>
+  Effect.gen(function* () {
+    if (ctx.registry.size === 0) return ctx.window.document.body.innerHTML;
+
+    // Clone to avoid mutating real VDOM
+    const clone = yield* Effect.sync(() =>
+      ctx.window.document.body.cloneNode(true) as unknown as HappyHTMLElement
+    );
+
+    // Strip rendered CE template content, keeping only data-children content
+    yield* pipe(
+      [...ctx.registry.keys()],
+      Effect.forEach((tag) =>
+        pipe(
+          [...clone.querySelectorAll(tag)],
+          Effect.forEach((el) =>
+            Effect.sync(() => {
+              const childrenContainer = el.querySelector("[data-children]");
+              el.innerHTML = childrenContainer ? childrenContainer.innerHTML : "";
+            }),
+          ),
+        ),
+      ),
+    );
+
+    return clone.innerHTML;
+  });

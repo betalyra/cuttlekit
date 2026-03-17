@@ -3,7 +3,7 @@ import { streamText, type TextStreamPart } from "ai";
 import type { LanguageModelConfig } from "@cuttlekit/common/server";
 import { MemoryService, type MemorySearchResult } from "../memory/index.js";
 import { accumulateLinesWithFlush } from "../../stream/utils.js";
-import { PatchValidator, renderCETree, type Patch, type ValidationContext } from "../vdom/index.js";
+import { PatchValidator, renderCETree, getCompactHtmlFromCtx, type Patch, type ValidationContext } from "../vdom/index.js";
 import { ModelRegistry } from "../model-registry.js";
 import {
   PatchSchema,
@@ -305,6 +305,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
               Effect.gen(function* () {
                 const successfulPatches = yield* Ref.get(patchesRef);
                 yield* Ref.set(patchesRef, []); // Reset for next attempt
+                const compactHtml = yield* getCompactHtmlFromCtx(validationCtx);
                 yield* Effect.log(
                   `[Attempt ${attempt}] ${genError._tag}, retrying...`,
                   {
@@ -323,6 +324,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
                         content: buildCorrectivePrompt(
                           genError,
                           successfulPatches,
+                          compactHtml,
                         ),
                       },
                     ],

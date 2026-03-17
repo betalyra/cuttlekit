@@ -104,19 +104,24 @@ export const buildSystemPrompt = (deps?: PackageInfo[]): string =>
 export const buildCorrectivePrompt = (
   error: GenerationError,
   successfulPatches: readonly Patch[] = [],
+  currentHtml?: string,
 ): string => {
   const applied =
     successfulPatches.length > 0
       ? `\nAPPLIED: ${JSON.stringify(successfulPatches)}\nContinue from here.`
       : "";
 
+  const pageState = currentHtml
+    ? `\nCURRENT PAGE STATE:\n${currentHtml}\n`
+    : "";
+
   if (error._tag === "JsonParseError") {
-    return `JSON ERROR: ${error.message}
+    return `${pageState}JSON ERROR: ${error.message}
 Bad: ${error.line.slice(0, 100)}
 Fix: valid JSONL, one JSON/line, single quotes in HTML attrs${applied}`;
   }
 
-  return `PATCH ERROR "${error.patch.selector}": ${error.reason}
+  return `${pageState}PATCH ERROR "${error.patch.selector}": ${error.reason}
 Fix: selector must exist, use #id only${applied}`;
 };
 
