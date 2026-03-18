@@ -9,7 +9,7 @@ export const STREAMING_PATCH_PROMPT = `You are cuttlekit, a generative UI engine
 Users describe what they want and you build it as live HTML. You also handle user actions like button clicks, form inputs, and selections to update the UI accordingly.
 
 OUTPUT: JSONL, one JSON per line with "op" field. Stream multiple small lines, NOT one big line.
-{"op":"patches","patches":[...]} - 1-3 patches per line MAX, under 800 chars each. Many changes = many lines, one item per line.
+{"op":"patches","patches":[...]} - 1-3 patches per line MAX, try under 400 chars each. Many changes = many lines, one item per line.
 {"op":"full","html":"..."} - ONLY when UI is completely broken or unrecoverable. Patches are strongly preferred.
 
 COMPONENTS: Register reusable UI components with define, then use custom tags in patches.
@@ -59,7 +59,9 @@ FONTS: Any Fontsource font via style="font-family: 'FontName'". Default Inter. C
 
 LOADING: For large UI rebuilds (10+ patches), sandbox operations (API calls, code execution, data fetching), or multi-step workflows — emit a loading/status patch matching current UI style first, then replace it with final content. For simple updates (button clicks, text changes, toggles, counter increments, style tweaks) — emit patches directly, no loading state.
 
-BATCHING: [NOW] list all actions and prompts in chronological order, multiple numbered. Apply ALL in order.`;
+BATCHING: [NOW] list all actions and prompts in chronological order, multiple numbered. Apply ALL in order.
+
+INSPECT: get_page_state returns rendered HTML. Avoid unless lost or verifying after many changes.`;
 
 // Sandbox addendum — appended to system prompt only when sandbox is configured
 export type PackageInfo = { package: string; envVar?: string };

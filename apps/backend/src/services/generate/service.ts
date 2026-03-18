@@ -1,5 +1,6 @@
-import { Effect, Stream, pipe, DateTime, Duration, Ref, Option } from "effect";
-import { streamText, type TextStreamPart } from "ai";
+import { Effect, Stream, pipe, DateTime, Duration, Ref, Option, Runtime } from "effect";
+import { streamText, tool, type TextStreamPart, type ToolSet } from "ai";
+import { z } from "zod";
 import type { LanguageModelConfig } from "@cuttlekit/common/server";
 import { MemoryService, type MemorySearchResult } from "../memory/index.js";
 import { accumulateLinesWithFlush } from "../../stream/utils.js";
@@ -22,7 +23,7 @@ import {
   safeAsyncIterable,
 } from "./index.js";
 import type { GenerationError } from "./errors.js";
-import { ToolService, TOOL_STEP_LIMIT, type SandboxTools } from "./tools.js";
+import { ToolService, TOOL_STEP_LIMIT } from "./tools.js";
 import type { ManagedSandbox, SandboxContext } from "../sandbox/manager.js";
 
 export class GenerateService extends Effect.Service<GenerateService>()(
@@ -104,7 +105,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
         usageRef: Ref.Ref<Usage[]>,
         ttftRef: Ref.Ref<number>,
         modelConfig: LanguageModelConfig,
-        requestTools?: SandboxTools,
+        requestTools: ToolSet,
       ): Stream.Stream<UnifiedResponse, GenerationError | Error> =>
         Stream.unwrap(
           Effect.gen(function* () {
@@ -118,11 +119,9 @@ export class GenerateService extends Effect.Service<GenerateService>()(
               model: modelConfig.model,
               messages: messages as Message[],
               providerOptions: modelConfig.providerOptions,
-              ...(requestTools && {
-                tools: requestTools,
-                stopWhen: TOOL_STEP_LIMIT,
-                toolChoice: "auto",
-              }),
+              tools: requestTools,
+              stopWhen: TOOL_STEP_LIMIT,
+              toolChoice: "auto",
             });
 
             // Use fullStream to get both text AND usage events
@@ -137,7 +136,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
             return pipe(
               fullStream,
               // Extract text from text-delta, track usage from finish
-              Stream.mapEffect((part: TextStreamPart<SandboxTools>) =>
+              Stream.mapEffect((part: TextStreamPart<ToolSet>) =>
                 Effect.gen(function* () {
                   // Capture usage from finish-step using provider-specific extractor
                   if (part.type === "finish-step") {
@@ -258,7 +257,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
         modeRef: Ref.Ref<"patches" | "full">,
         attempt: number,
         modelConfig: LanguageModelConfig,
-        requestTools?: SandboxTools,
+        requestTools: ToolSet,
       ): Stream.Stream<UnifiedResponse, Error> => {
         if (attempt >= MAX_RETRY_ATTEMPTS) {
           return Stream.fail(
@@ -352,11 +351,12 @@ export class GenerateService extends Effect.Service<GenerateService>()(
           const { sessionId, currentHtml, catalog, actions } = options;
 
           const modelConfig = yield* modelRegistry.resolve(options.modelId);
+          const runtime = yield* Effect.runtime<never>();
 
           // Build per-request sandbox tools (only when sandbox is configured)
           // Reuse session-scoped sandboxCtx (warm mode) or create fresh one (lazy)
           const packageInfo = toolService.listPackageInfo();
-          const requestTools =
+          const sandboxTools =
             packageInfo.length > 0
               ? yield* Effect.gen(function* () {
                   const sandboxCtx: SandboxContext = options.sandboxCtx ?? {
@@ -365,7 +365,6 @@ export class GenerateService extends Effect.Service<GenerateService>()(
                     ),
                     lock: yield* Effect.makeSemaphore(1),
                   };
-                  const runtime = yield* Effect.runtime<never>();
                   return toolService.makeTools({
                     sessionId,
                     sandboxCtx,
@@ -491,6 +490,18 @@ export class GenerateService extends Effect.Service<GenerateService>()(
             yield* renderCETree(validationCtx.window, validationCtx.registry);
           }
 
+          // Build always-available page state tool + optional sandbox tools
+          const allTools: ToolSet = {
+            get_page_state: tool({
+              description: "Get the current rendered HTML. Use ONLY when you've lost track after many patches.",
+              inputSchema: z.object({}),
+              execute: async () => ({
+                html: Runtime.runSync(runtime)(getCompactHtmlFromCtx(validationCtx)),
+              }),
+            }),
+            ...(sandboxTools ?? {}),
+          };
+
           // Create Refs to track state across retries
           const usageRef = yield* Ref.make<Usage[]>([]);
           const ttftRef = yield* Ref.make<number>(0);
@@ -508,7 +519,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
             modeRef,
             0,
             modelConfig,
-            requestTools,
+            allTools,
           );
 
           // Stats stream runs AFTER content stream completes

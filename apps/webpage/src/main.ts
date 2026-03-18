@@ -149,9 +149,11 @@ const app = {
       loadIconsFromHTML(content);
     }
 
-    if ("text" in patch) {
-      el.textContent = patch.text;
-    } else if ("attr" in patch) {
+    if ("remove" in patch) {
+      el.remove();
+      return;
+    }
+    if ("attr" in patch) {
       Object.entries(patch.attr).forEach(([key, value]) => {
         if (value === null) {
           el.removeAttribute(key);
@@ -159,14 +161,15 @@ const app = {
           el.setAttribute(key, value);
         }
       });
+    }
+    if ("text" in patch) {
+      el.textContent = patch.text;
+    } else if ("html" in patch) {
+      el.innerHTML = patch.html;
     } else if ("append" in patch) {
       el.insertAdjacentHTML("beforeend", patch.append);
     } else if ("prepend" in patch) {
       el.insertAdjacentHTML("afterbegin", patch.prepend);
-    } else if ("html" in patch) {
-      el.innerHTML = patch.html;
-    } else if ("remove" in patch) {
-      el.remove();
     }
   },
 
