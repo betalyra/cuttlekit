@@ -55,6 +55,14 @@ const SandboxDefSchema = Schema.Struct({
   }),
 });
 
+const MemoryDefSchema = Schema.Struct({
+  recent_count: Schema.optionalWith(Schema.Number, { default: () => 10 }),
+  search_candidates: Schema.optionalWith(Schema.Number, {
+    default: () => 15,
+  }),
+  max_relevant: Schema.optionalWith(Schema.Number, { default: () => 3 }),
+});
+
 const TomlSchema = Schema.Struct({
   default_model: Schema.String,
   background_model: Schema.optional(Schema.String),
@@ -62,6 +70,7 @@ const TomlSchema = Schema.Struct({
     key: Schema.String,
     value: ProviderDefSchema,
   }),
+  memory: Schema.optional(MemoryDefSchema),
   sandbox: Schema.optional(SandboxDefSchema),
 });
 
@@ -106,9 +115,16 @@ export type SandboxConfig = {
   readonly dependencies: ReadonlyArray<SandboxDependencyConfig>;
 };
 
+export type MemoryConfig = {
+  readonly recentCount: number;
+  readonly searchCandidates: number;
+  readonly maxRelevant: number;
+};
+
 export type AppConfig = {
   readonly models: ModelsConfig;
   readonly sandbox: Option.Option<SandboxConfig>;
+  readonly memory: MemoryConfig;
 };
 
 // Convention: provider "groq" → env var "GROQ_API_KEY"
@@ -209,6 +225,13 @@ export const loadAppConfig = Effect.gen(function* () {
     ? yield* resolveSandbox(toml.sandbox)
     : Option.none<SandboxConfig>();
 
+  // Resolve memory config (optional — defaults apply when absent)
+  const memory: MemoryConfig = {
+    recentCount: toml.memory?.recent_count ?? 10,
+    searchCandidates: toml.memory?.search_candidates ?? 15,
+    maxRelevant: toml.memory?.max_relevant ?? 3,
+  };
+
   yield* Effect.log("Config loaded", {
     providers: providers.map((p) => p.name),
     models: providers.flatMap((p) => p.models.map((m) => m.id)),
@@ -225,7 +248,8 @@ export const loadAppConfig = Effect.gen(function* () {
         deps: s.dependencies.map((d) => d.package),
       }),
     }),
+    memory,
   });
 
-  return { models, sandbox } satisfies AppConfig;
+  return { models, sandbox, memory } satisfies AppConfig;
 });

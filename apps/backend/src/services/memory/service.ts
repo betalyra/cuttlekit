@@ -45,15 +45,19 @@ const MemorySummariesSchema = z.object({
   promptSummary: z
     .string()
     .nullable()
-    .describe("Summary of user prompts in one sentence, or null if no prompts"),
+    .describe(
+      "Compressed user intent, 3-8 words. Drop articles/filler. Null if no prompts.",
+    ),
   actionSummary: z
     .string()
     .nullable()
-    .describe("Summary of user actions in one sentence, or null if no actions"),
+    .describe(
+      "Compressed action, 3-8 words. Drop articles/filler. Null if no actions.",
+    ),
   changeSummary: z
     .string()
     .describe(
-      "1-2 sentence summary of what changed visually/functionally, not technical details",
+      "Compressed visual/functional change, 5-12 words. Drop articles/connectives/filler. Keep facts/numbers.",
     ),
 });
 
@@ -143,7 +147,9 @@ export class MemoryService extends Effect.Service<MemoryService>()(
             ? `User actions:\n${op.actions.map((a, i) => `${i + 1}. ${a.action}${a.data ? ` (data: ${JSON.stringify(a.data)})` : ""}`).join("\n")}`
             : "No user actions.";
 
-          const prompt = `Analyze these UI changes and generate summaries.
+          const prompt = `Analyze UI changes. Generate compressed summaries.
+
+COMPRESSION: Drop articles, connectives, filler. Active voice, present tense. Keep facts/numbers/specifics.
 
 ${promptContext}
 
@@ -152,9 +158,9 @@ ${actionContext}
 ${changeDescription}
 
 Generate:
-1. promptSummary: If there are prompts, summarize them in one sentence. Otherwise null.
-2. actionSummary: If there are actions, summarize them in one sentence. Otherwise null.
-3. changeSummary: Describe what changed visually/functionally in 1-2 sentences.`;
+1. promptSummary: Compressed user intent (3-8 words). Null if no prompts.
+2. actionSummary: Compressed action (3-8 words). Null if no actions.
+3. changeSummary: Compressed visual/functional change (5-12 words).`;
 
           const result = yield* Effect.promise(() =>
             generateText({

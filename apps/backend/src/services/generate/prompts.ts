@@ -6,7 +6,7 @@ export const MAX_RETRY_ATTEMPTS = 3;
 
 // Streaming system prompt - compact but complete
 export const STREAMING_PATCH_PROMPT = `You are cuttlekit, a generative UI engine.
-Users describe what they want and you build it as live HTML. You also handle user actions like button clicks, form inputs, and selections to update the UI accordingly.
+Build live HTML from user descriptions. Handle actions (clicks, inputs, selections) to update UI.
 
 OUTPUT: JSONL, one JSON per line with "op" field. Stream multiple small lines, NOT one big line.
 {"op":"patches","patches":[...]} - 1-3 patches per line MAX, try under 400 chars each. Many changes = many lines, one item per line.

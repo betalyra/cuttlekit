@@ -6,6 +6,7 @@ import { MemoryService, type MemorySearchResult } from "../memory/index.js";
 import { accumulateLinesWithFlush } from "../../stream/utils.js";
 import { PatchValidator, renderCETree, getCompactHtmlFromCtx, type Patch, type ValidationContext } from "../vdom/index.js";
 import { ModelRegistry } from "../model-registry.js";
+import { loadAppConfig } from "../app-config.js";
 import {
   PatchSchema,
   LLMResponseSchema,
@@ -35,6 +36,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
       const memory = yield* MemoryService;
       const patchValidator = yield* PatchValidator;
       const toolService = yield* ToolService;
+      const { memory: memoryConfig } = yield* loadAppConfig;
 
       // ============================================================
       // Parse JSON line - fails with JsonParseError for retry
@@ -386,14 +388,14 @@ export class GenerateService extends Effect.Service<GenerateService>()(
           // Fetch recent entries and semantic search results
           const [recentEntries, relevantEntries] = yield* Effect.all([
             memory
-              .getRecent(sessionId, 5)
+              .getRecent(sessionId, memoryConfig.recentCount)
               .pipe(
                 Effect.catchAll(() =>
                   Effect.succeed([] as MemorySearchResult[]),
                 ),
               ),
             memory
-              .search(sessionId, searchQuery, 8)
+              .search(sessionId, searchQuery, memoryConfig.searchCandidates)
               .pipe(
                 Effect.catchAll(() =>
                   Effect.succeed([] as MemorySearchResult[]),
@@ -405,10 +407,20 @@ export class GenerateService extends Effect.Service<GenerateService>()(
           const recentIds = new Set(recentEntries.map((e) => e.id));
           const uniqueRelevant = relevantEntries
             .filter((e) => !recentIds.has(e.id))
-            .slice(0, 3);
+            .slice(0, memoryConfig.maxRelevant);
 
-          // Build history (context only, not to act on)
+          // Build history: relevant context first (background), then recent (timeline closest to [NOW])
           const historyParts: string[] = [];
+          if (uniqueRelevant.length > 0) {
+            historyParts.push(
+              `[RELEVANT PAST CONTEXT]\n${uniqueRelevant
+                .map(
+                  (e) =>
+                    `- ${e.promptSummary ? `"${e.promptSummary}" → ` : ""}${e.changeSummary}`,
+                )
+                .join("\n")}`,
+            );
+          }
           if (recentEntries.length > 0) {
             historyParts.push(
               `[RECENT CHANGES]\n${recentEntries
@@ -418,16 +430,6 @@ export class GenerateService extends Effect.Service<GenerateService>()(
                   const summary = e.promptSummary ? `"${e.promptSummary}" → ` : "";
                   return `${idx}. ${summary}${e.changeSummary}`;
                 })
-                .join("\n")}`,
-            );
-          }
-          if (uniqueRelevant.length > 0) {
-            historyParts.push(
-              `[RELEVANT PAST CONTEXT]\n${uniqueRelevant
-                .map(
-                  (e) =>
-                    `- ${e.promptSummary ? `"${e.promptSummary}" → ` : ""}${e.changeSummary}`,
-                )
                 .join("\n")}`,
             );
           }
