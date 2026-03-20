@@ -182,6 +182,7 @@ const app = {
       `TTC ${ttc}`,
       `${s.tokensPerSecond} tok/s`,
       `${s.cacheRate}% cache`,
+      `${s.patchCount} patches`,
     ].join(" · ");
     statsEl.style.display = "flex";
   },

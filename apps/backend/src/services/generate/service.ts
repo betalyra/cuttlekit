@@ -4,13 +4,14 @@ import { z } from "zod";
 import type { LanguageModelConfig } from "@cuttlekit/common/server";
 import { MemoryService, type MemorySearchResult } from "../memory/index.js";
 import { accumulateLinesWithFlush } from "../../stream/utils.js";
-import { PatchValidator, renderCETree, getCompactHtmlFromCtx, type Patch, type ValidationContext } from "../vdom/index.js";
+import { PatchValidator, renderCETree, getCompactHtmlFromCtx, type ValidationContext } from "../vdom/index.js";
 import { ModelRegistry } from "../model-registry.js";
 import { loadAppConfig } from "../app-config.js";
 import {
   PatchSchema,
   LLMResponseSchema,
   JsonParseError,
+  type LLMResponse,
   type UnifiedResponse,
   type UnifiedGenerateOptions,
   type Message,
@@ -255,7 +256,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
         validationCtx: ValidationContext,
         usageRef: Ref.Ref<Usage[]>,
         ttftRef: Ref.Ref<number>,
-        patchesRef: Ref.Ref<Patch[]>,
+        opsRef: Ref.Ref<LLMResponse[]>,
         modeRef: Ref.Ref<"patches" | "full">,
         attempt: number,
         modelConfig: LanguageModelConfig,
@@ -277,15 +278,13 @@ export class GenerateService extends Effect.Service<GenerateService>()(
             requestTools,
           ),
 
-          // Track successful patches, mode, and log
+          // Track successful operations, mode, and log
           Stream.tap((response) =>
             Effect.gen(function* () {
-              if (response.op === "patches") {
-                yield* Ref.update(patchesRef, (ps) => [
-                  ...ps,
-                  ...response.patches,
-                ]);
-              } else if (response.op === "full") {
+              if (response.op !== "stats") {
+                yield* Ref.update(opsRef, (ops) => [...ops, response]);
+              }
+              if (response.op === "full") {
                 yield* Ref.set(modeRef, "full");
               }
               yield* Effect.log(`[Attempt ${attempt}] Emitting response`, {
@@ -304,14 +303,18 @@ export class GenerateService extends Effect.Service<GenerateService>()(
             const genError = error as GenerationError;
             return Stream.unwrap(
               Effect.gen(function* () {
-                const successfulPatches = yield* Ref.get(patchesRef);
-                yield* Ref.set(patchesRef, []); // Reset for next attempt
+                const successfulOps = yield* Ref.get(opsRef);
+                // Keep defines (persist in registry across retries), reset patches/full
+                yield* Ref.set(
+                  opsRef,
+                  successfulOps.filter((o) => o.op === "define"),
+                );
                 const compactHtml = yield* getCompactHtmlFromCtx(validationCtx);
                 yield* Effect.log(
                   `[Attempt ${attempt}] ${genError._tag}, retrying...`,
                   {
                     error: genError.message,
-                    successfulPatches: successfulPatches.length,
+                    successfulOps: successfulOps.length,
                   },
                 );
 
@@ -324,7 +327,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
                         role: "user",
                         content: buildCorrectivePrompt(
                           genError,
-                          successfulPatches,
+                          successfulOps,
                           compactHtml,
                         ),
                       },
@@ -332,7 +335,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
                     validationCtx,
                     usageRef,
                     ttftRef,
-                    patchesRef,
+                    opsRef,
                     modeRef,
                     attempt + 1,
                     modelConfig,
@@ -507,7 +510,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
           // Create Refs to track state across retries
           const usageRef = yield* Ref.make<Usage[]>([]);
           const ttftRef = yield* Ref.make<number>(0);
-          const patchesRef = yield* Ref.make<Patch[]>([]);
+          const opsRef = yield* Ref.make<LLMResponse[]>([]);
           const modeRef = yield* Ref.make<"patches" | "full">("patches");
           const startTime = yield* DateTime.now;
 
@@ -517,7 +520,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
             validationCtx,
             usageRef,
             ttftRef,
-            patchesRef,
+            opsRef,
             modeRef,
             0,
             modelConfig,
@@ -577,7 +580,11 @@ export class GenerateService extends Effect.Service<GenerateService>()(
               });
 
               const mode = yield* Ref.get(modeRef);
-              const patches = yield* Ref.get(patchesRef);
+              const ops = yield* Ref.get(opsRef);
+              const patchCount = ops.reduce(
+                (n, o) => n + (o.op === "patches" ? o.patches.length : 0),
+                0,
+              );
               const ttft = yield* Ref.get(ttftRef);
 
               return {
@@ -585,7 +592,7 @@ export class GenerateService extends Effect.Service<GenerateService>()(
                 cacheRate: Math.round(cacheRate),
                 tokensPerSecond: Math.round(tokensPerSecond),
                 mode,
-                patchCount: patches.length,
+                patchCount,
                 ttft: Math.round(ttft),
                 ttc: Math.round(elapsedMs),
               };

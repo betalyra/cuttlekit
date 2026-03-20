@@ -1,6 +1,6 @@
 import type { GenerationError } from "./errors.js";
-import type { Patch } from "../vdom/index.js";
 import type { Action } from "@cuttlekit/common/client";
+import type { LLMResponse } from "./types.js";
 
 export const MAX_RETRY_ATTEMPTS = 3;
 
@@ -20,6 +20,7 @@ COMPONENTS: Register reusable UI components with define, then use custom tags in
 - Use custom tags in patches: {"selector":"#root","append":"<my-card id='c1' title='Hello' status='Active'></my-card>"}
 - Define components BEFORE first use. One define per line.
 - Components persist across requests — do NOT re-emit define unless restyling. Check [COMPONENTS] for already-defined tags.
+- When creating 3+ similar elements, ALWAYS define a component first. Repeated inline HTML wastes context — components keep page state compact.
 
 JSON ESCAPING: Use single quotes for HTML attributes to avoid escaping.
 CORRECT: {"html":"<div class='flex'>"}
@@ -50,6 +51,7 @@ INTERACTIVITY - NO JavaScript/onclick (won't work):
 Use &quot; for JSON in data-action-data. Input values auto-sent with actions.
 
 ACTIONS: Update data only — don't redesign or restyle the UI. Exception: inherently visual actions (color pickers, theme toggles).
+RESTYLING: Visual-only changes must preserve existing data — never silently replace content.
 
 IDs REQUIRED: All interactive/dynamic elements need unique id. Containers: id="todo-list". Items: id="todo-1". Buttons: id="add-btn".
 
@@ -105,12 +107,22 @@ export const buildSystemPrompt = (deps?: PackageInfo[]): string =>
 // Build corrective prompt for retry after error
 export const buildCorrectivePrompt = (
   error: GenerationError,
-  successfulPatches: readonly Patch[] = [],
+  successfulOps: readonly LLMResponse[] = [],
   currentHtml?: string,
 ): string => {
+  const defines = successfulOps.filter((o) => o.op === "define");
+  const patches = successfulOps.flatMap((o) =>
+    o.op === "patches" ? o.patches : [],
+  );
+
+  const defined =
+    defines.length > 0
+      ? `\nDEFINED: ${defines.map((d) => d.tag).join(", ")} (already registered — do NOT re-emit)`
+      : "";
+
   const applied =
-    successfulPatches.length > 0
-      ? `\nAPPLIED: ${JSON.stringify(successfulPatches)}\nContinue from here.`
+    patches.length > 0
+      ? `\nAPPLIED: ${JSON.stringify(patches)}\nContinue from here.`
       : "";
 
   const pageState = currentHtml
@@ -120,11 +132,11 @@ export const buildCorrectivePrompt = (
   if (error._tag === "JsonParseError") {
     return `${pageState}JSON ERROR: ${error.message}
 Bad: ${error.line.slice(0, 100)}
-Fix: valid JSONL, one JSON/line, single quotes in HTML attrs${applied}`;
+Fix: valid JSONL, one JSON/line, single quotes in HTML attrs${defined}${applied}`;
   }
 
   return `${pageState}PATCH ERROR "${error.patch.selector}": ${error.reason}
-Fix: selector must exist, use #id only${applied}`;
+Fix: selector must exist, use #id only${defined}${applied}`;
 };
 
 // Build a compact, LLM-readable description of a single action.
