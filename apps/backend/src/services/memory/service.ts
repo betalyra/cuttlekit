@@ -46,18 +46,18 @@ const MemorySummariesSchema = z.object({
     .string()
     .nullable()
     .describe(
-      "Compressed user intent, 3-8 words. Drop articles/filler. Null if no prompts.",
+      "Compressed user intent. Drop articles/filler, keep all details — selectors, colors, text, layout info. Null if no prompts.",
     ),
   actionSummary: z
     .string()
     .nullable()
     .describe(
-      "Compressed action, 3-8 words. Drop articles/filler. Null if no actions.",
+      "Compressed action. Drop articles/filler, keep all details — element ids, values, event types. Null if no actions.",
     ),
   changeSummary: z
     .string()
     .describe(
-      "Compressed visual/functional change, 5-12 words. Drop articles/connectives/filler. Keep facts/numbers.",
+      "Compressed visual/functional change. Drop articles/connectives/filler. Describe what visually changed, not DOM operations. Keep ALL important details.",
     ),
 });
 
@@ -147,9 +147,11 @@ export class MemoryService extends Effect.Service<MemoryService>()(
             ? `User actions:\n${op.actions.map((a, i) => `${i + 1}. ${a.action}${a.data ? ` (data: ${JSON.stringify(a.data)})` : ""}`).join("\n")}`
             : "No user actions.";
 
-          const prompt = `Analyze UI changes. Generate compressed summaries.
+          const prompt = `Summarize UI changes. Focus on WHAT visually changed, not DOM operations.
 
-COMPRESSION: Drop articles, connectives, filler. Active voice, present tense. Keep facts/numbers/specifics.
+STYLE: Caveman compression — drop articles, connectives, filler. Keep ALL important info. Describe visual result, not selectors/divs.
+BAD: "replaced html #hero, appended content #left-col, updated attributes #root class"
+GOOD: "redesigned hero section, added sidebar cards, changed color palette to dark theme"
 
 ${promptContext}
 
@@ -158,9 +160,9 @@ ${actionContext}
 ${changeDescription}
 
 Generate:
-1. promptSummary: Compressed user intent (3-8 words). Null if no prompts.
-2. actionSummary: Compressed action (3-8 words). Null if no actions.
-3. changeSummary: Compressed visual/functional change (5-12 words).`;
+1. promptSummary: What user asked for, all key details. Null if no prompts.
+2. actionSummary: What user did, all key details. Null if no actions.
+3. changeSummary: What visually changed, all key details. Describe appearance not DOM ops.`;
 
           const result = yield* Effect.promise(() =>
             generateText({
