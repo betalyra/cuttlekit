@@ -129,10 +129,10 @@ const app = {
   },
 
   extractPatchContent(patch: Patch): string | null {
-    if ("html" in patch) return patch.html;
-    if ("append" in patch) return patch.append;
-    if ("prepend" in patch) return patch.prepend;
-    if ("attr" in patch && patch.attr.style) return patch.attr.style;
+    if (patch.html) return patch.html;
+    if (patch.append) return patch.append;
+    if (patch.prepend) return patch.prepend;
+    if (patch.attr?.style) return patch.attr.style;
     return null;
   },
 
@@ -149,11 +149,11 @@ const app = {
       loadIconsFromHTML(content);
     }
 
-    if ("remove" in patch) {
+    if (patch.remove) {
       el.remove();
       return;
     }
-    if ("attr" in patch) {
+    if (patch.attr) {
       Object.entries(patch.attr).forEach(([key, value]) => {
         if (value === null) {
           el.removeAttribute(key);
@@ -162,13 +162,16 @@ const app = {
         }
       });
     }
-    if ("text" in patch) {
+    if (patch.text !== undefined) {
       el.textContent = patch.text;
-    } else if ("html" in patch) {
+    }
+    if (patch.html !== undefined) {
       el.innerHTML = patch.html;
-    } else if ("append" in patch) {
+    }
+    if (patch.append) {
       el.insertAdjacentHTML("beforeend", patch.append);
-    } else if ("prepend" in patch) {
+    }
+    if (patch.prepend) {
       el.insertAdjacentHTML("afterbegin", patch.prepend);
     }
   },
@@ -224,8 +227,8 @@ const app = {
         this.applyPatch(patch);
         // Re-render CEs after structural mutations and CE prop attr updates.
         const hasStructuralMutation =
-          "append" in patch || "prepend" in patch || "html" in patch;
-        const hasAttrMutation = "attr" in patch;
+          !!patch.append || !!patch.prepend || patch.html !== undefined;
+        const hasAttrMutation = !!patch.attr;
         if (hasStructuralMutation || hasAttrMutation) {
           renderTree(this.getElements().contentEl, hasAttrMutation);
         }

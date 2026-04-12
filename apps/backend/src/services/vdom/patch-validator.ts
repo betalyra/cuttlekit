@@ -111,7 +111,7 @@ export class PatchValidator extends Effect.Service<PatchValidator>()(
        */
       const defineComponent = (
         ctx: ValidationContext,
-        spec: { tag: string; props: string[]; template: string },
+        spec: { tag: string; props: readonly string[]; template: string },
       ) =>
         Effect.gen(function* () {
           const existing = ctx.registry.get(spec.tag);
@@ -181,9 +181,9 @@ export class PatchValidator extends Effect.Service<PatchValidator>()(
         Effect.gen(function* () {
           const result = yield* validateAll(ctx.doc, patches);
           const hasStructuralMutation = patches.some(
-            (p) => "append" in p || "prepend" in p || "html" in p,
+            (p) => !!p.append || !!p.prepend || p.html !== undefined,
           );
-          const hasAttrMutation = patches.some((p) => "attr" in p);
+          const hasAttrMutation = patches.some((p) => !!p.attr);
           if ((hasStructuralMutation || hasAttrMutation) && ctx.registry.size > 0) {
             yield* renderCETree(ctx.window, ctx.registry, hasAttrMutation);
           }

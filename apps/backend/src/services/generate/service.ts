@@ -1,4 +1,4 @@
-import { Effect, Stream, pipe, DateTime, Duration, Ref, Option, Runtime } from "effect";
+import { Effect, Stream, pipe, DateTime, Duration, Ref, Option, Runtime, Schema, Either } from "effect";
 import { streamText, tool, type TextStreamPart, type ToolSet } from "ai";
 import { z } from "zod";
 import type { LanguageModelConfig } from "@cuttlekit/common/server";
@@ -53,25 +53,25 @@ export class GenerateService extends Effect.Service<GenerateService>()(
               }),
           });
 
-          // Try parsing as LLM response (patches only)
-          const llmResult = LLMResponseSchema.safeParse(parseResult);
-          if (llmResult.success) {
-            return llmResult.data;
+          // Try parsing as LLM response
+          const llmResult = Schema.decodeUnknownEither(LLMResponseSchema)(parseResult);
+          if (Either.isRight(llmResult)) {
+            return llmResult.right;
           }
 
           // Fallback: check if it's a raw patch and wrap it
-          const patchResult = PatchSchema.safeParse(parseResult);
-          if (patchResult.success) {
+          const patchResult = Schema.decodeUnknownEither(PatchSchema)(parseResult);
+          if (Either.isRight(patchResult)) {
             return {
               op: "patches" as const,
-              patches: [patchResult.data],
+              patches: [patchResult.right],
             };
           }
 
           // Neither valid - fail with JsonParseError
           return yield* new JsonParseError({
             line,
-            message: z.prettifyError(llmResult.error),
+            message: String(llmResult.left),
           });
         });
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Effect, Stream, Layer, Chunk, Option, Ref } from "effect";
+import { NodeFileSystem } from "@effect/platform-node";
 import { MockLanguageModelV3 } from "ai/test";
 import { simulateReadableStream } from "ai";
 import type { LanguageModelV3StreamPart } from "@ai-sdk/provider";
@@ -119,6 +120,7 @@ const createTestLayer = (mockModel: ReturnType<typeof createMockModel>) =>
     Layer.provide(PatchValidator.Default),
     Layer.provide(createMockRegistryLayer(mockModel)),
     Layer.provide(MockToolServiceLayer),
+    Layer.provide(NodeFileSystem.layer),
   );
 
 // ============================================================
@@ -205,6 +207,7 @@ const createToolTestLayer = (
         Layer.provide(makeMockSandboxServiceLayer(manager)),
       ),
     ),
+    Layer.provide(NodeFileSystem.layer),
   );
 
 // ============================================================

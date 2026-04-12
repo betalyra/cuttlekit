@@ -14,7 +14,7 @@ import { StoreService } from "./store.js";
 // ============================================================
 
 export type MemoryChange =
-  | { type: "patches"; patches: Patch[] }
+  | { type: "patches"; patches: readonly Patch[] }
   | { type: "full"; html: string };
 
 export type MemoryOperation = {
@@ -65,35 +65,16 @@ const MemorySummariesSchema = z.object({
 // Patch Description
 // ============================================================
 
-const describePatch = (patch: Patch): string =>
-  Match.value(patch).pipe(
-    Match.when({ selector: Match.string, text: Match.string }, (p) => {
-      const text = p.text;
-      return `Set text in ${p.selector} to "${text.slice(0, 50)}${text.length > 50 ? "..." : ""}"`;
-    }),
-    Match.when(
-      { selector: Match.string, attr: Match.defined },
-      (p) =>
-        `Updated attributes on ${p.selector}: ${Object.keys(p.attr).join(", ")}`,
-    ),
-    Match.when(
-      { selector: Match.string, html: Match.string },
-      (p) => `Replaced HTML in ${p.selector}`,
-    ),
-    Match.when(
-      { selector: Match.string, append: Match.string },
-      (p) => `Appended content to ${p.selector}`,
-    ),
-    Match.when(
-      { selector: Match.string, prepend: Match.string },
-      (p) => `Prepended content to ${p.selector}`,
-    ),
-    Match.when(
-      { selector: Match.string, remove: Match.boolean },
-      (p) => `Removed ${p.selector}`,
-    ),
-    Match.exhaustive,
-  );
+const describePatch = (patch: Patch): string => {
+  const parts: string[] = [];
+  if (patch.remove) { parts.push(`Removed ${patch.selector}`); return parts.join("; "); }
+  if (patch.attr) parts.push(`Updated attributes on ${patch.selector}: ${Object.keys(patch.attr).join(", ")}`);
+  if (patch.text !== undefined) parts.push(`Set text in ${patch.selector} to "${patch.text.slice(0, 50)}${patch.text.length > 50 ? "..." : ""}"`);
+  if (patch.html !== undefined) parts.push(`Replaced HTML in ${patch.selector}`);
+  if (patch.append) parts.push(`Appended content to ${patch.selector}`);
+  if (patch.prepend) parts.push(`Prepended content to ${patch.selector}`);
+  return parts.join("; ") || `Patch on ${patch.selector}`;
+};
 
 const describePatches = (patches: readonly Patch[]): string =>
   patches.map(describePatch).join("\n");

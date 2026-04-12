@@ -30,13 +30,15 @@ type DefineOp = {
   readonly template: string
 }
 
-type Patch =
-  | { readonly selector: string; readonly append: string }
-  | { readonly selector: string; readonly prepend: string }
-  | { readonly selector: string; readonly attr: Record<string, string | null> }
-  | { readonly selector: string; readonly remove: true }
-  | { readonly selector: string; readonly text: string }
-  | { readonly selector: string; readonly html: string }
+type Patch = {
+  readonly selector: string
+  readonly text?: string
+  readonly attr?: Record<string, string | null>
+  readonly append?: string
+  readonly prepend?: string
+  readonly html?: string
+  readonly remove?: true
+}
 
 type Op = DefineOp | Patch
 type Registry = Map<string, ComponentSpec>
@@ -88,12 +90,12 @@ const applyPatch = (win: InstanceType<typeof Window>, patch: Patch) =>
   Effect.sync(() => {
     const el = win.document.querySelector(patch.selector)
     if (!el) return
-    if ("append" in patch) el.insertAdjacentHTML("beforeend", patch.append)
-    else if ("prepend" in patch) el.insertAdjacentHTML("afterbegin", patch.prepend)
-    else if ("html" in patch) el.innerHTML = patch.html
-    else if ("text" in patch) el.textContent = patch.text
-    else if ("attr" in patch) Object.entries(patch.attr).forEach(([k, v]) => v === null ? el.removeAttribute(k) : el.setAttribute(k, v))
-    else if ("remove" in patch) el.remove()
+    if (patch.remove) { el.remove(); return }
+    if (patch.attr) Object.entries(patch.attr).forEach(([k, v]) => v === null ? el.removeAttribute(k) : el.setAttribute(k, v))
+    if (patch.text !== undefined) el.textContent = patch.text
+    if (patch.html !== undefined) el.innerHTML = patch.html
+    if (patch.append) el.insertAdjacentHTML("beforeend", patch.append)
+    if (patch.prepend) el.insertAdjacentHTML("afterbegin", patch.prepend)
   })
 
 // ============================================================
@@ -117,7 +119,7 @@ const executeDef = (win: InstanceType<typeof Window>, registry: Registry, op: De
 const executePatch = (win: InstanceType<typeof Window>, registry: Registry, patch: Patch) =>
   Effect.gen(function* () {
     // Bootstrap #root on first structural mutation
-    const needsRoot = ("append" in patch || "html" in patch) && patch.selector === "#root"
+    const needsRoot = (!!patch.append || patch.html !== undefined) && patch.selector === "#root"
     if (needsRoot && !win.document.querySelector("#root")) {
       win.document.body.innerHTML = `<div id="root"></div>`
     }
@@ -125,7 +127,7 @@ const executePatch = (win: InstanceType<typeof Window>, registry: Registry, patc
     yield* applyPatch(win, patch)
 
     // Render CEs after structural mutations (attr handled by CE lifecycle)
-    if ("append" in patch || "prepend" in patch || "html" in patch) {
+    if (!!patch.append || !!patch.prepend || patch.html !== undefined) {
       yield* renderTree(win, registry)
     }
   })

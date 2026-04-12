@@ -131,7 +131,7 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
         // Transform unified responses to stream events, applying to VDOM
         let lastHtml = Option.getOrElse(currentHtml, () => "");
 
-        const handlePatchResponse = (patches: Patch[]) =>
+        const handlePatchResponse = (patches: readonly Patch[]) =>
           Effect.gen(function* () {
             const events = yield* Effect.forEach(patches, (patch) =>
               Effect.gen(function* () {
@@ -174,7 +174,7 @@ export class UIService extends Effect.Service<UIService>()("UIService", {
 
         const handleDefineResponse = (r: {
           tag: string;
-          props: string[];
+          props: readonly string[];
           template: string;
         }) =>
           Effect.gen(function* () {

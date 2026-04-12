@@ -1,14 +1,17 @@
 /**
- * Patch types for DOM manipulation.
+ * Patch type for DOM manipulation.
+ * Single flat object — all operation fields optional, apply whichever are present.
  * Used by both frontend (browser DOM) and backend (happy-dom).
  */
-export type Patch =
-  | { selector: string; text: string }
-  | { selector: string; attr: Record<string, string | null> }
-  | { selector: string; append: string }
-  | { selector: string; prepend: string }
-  | { selector: string; html: string }
-  | { selector: string; remove: true };
+export type Patch = {
+  selector: string;
+  text?: string;
+  attr?: Record<string, string | null>;
+  append?: string;
+  prepend?: string;
+  html?: string;
+  remove?: true;
+};
 
 export type ApplyPatchResult =
   | { _tag: "Success" }
@@ -22,10 +25,7 @@ const isSimpleIdSelector = (s: string): boolean =>
 /**
  * Apply a single patch to a document.
  * Works with both browser DOM and happy-dom.
- *
- * @param doc - Document or DocumentFragment to apply patch to
- * @param patch - The patch to apply
- * @returns Result indicating success or failure
+ * Applies all present fields — attr, then content mutations.
  */
 export const applyPatch = (
   doc: Document | DocumentFragment,
@@ -52,9 +52,11 @@ export const applyPatch = (
   }
 
   try {
-    if ("text" in patch) {
-      el.textContent = patch.text;
-    } else if ("attr" in patch) {
+    if (patch.remove) {
+      el.remove();
+      return { _tag: "Success" };
+    }
+    if (patch.attr) {
       Object.entries(patch.attr).forEach(([key, value]) => {
         if (value === null) {
           el.removeAttribute(key);
@@ -62,14 +64,18 @@ export const applyPatch = (
           el.setAttribute(key, value);
         }
       });
-    } else if ("append" in patch) {
-      el.insertAdjacentHTML("beforeend", patch.append);
-    } else if ("prepend" in patch) {
-      el.insertAdjacentHTML("afterbegin", patch.prepend);
-    } else if ("html" in patch) {
+    }
+    if (patch.text !== undefined) {
+      el.textContent = patch.text;
+    }
+    if (patch.html !== undefined) {
       el.innerHTML = patch.html;
-    } else if ("remove" in patch) {
-      el.remove();
+    }
+    if (patch.append) {
+      el.insertAdjacentHTML("beforeend", patch.append);
+    }
+    if (patch.prepend) {
+      el.insertAdjacentHTML("afterbegin", patch.prepend);
     }
     return { _tag: "Success" };
   } catch (e) {
@@ -83,10 +89,6 @@ export const applyPatch = (
 
 /**
  * Apply multiple patches to a document.
- *
- * @param doc - Document to apply patches to
- * @param patches - Array of patches to apply
- * @returns Summary of applied patches
  */
 export const applyPatches = (
   doc: Document | DocumentFragment,
@@ -111,8 +113,8 @@ export const applyPatches = (
  * Useful for font/icon loading.
  */
 export const getPatchHtmlContent = (patch: Patch): string | null => {
-  if ("html" in patch) return patch.html;
-  if ("append" in patch) return patch.append;
-  if ("prepend" in patch) return patch.prepend;
+  if (patch.html) return patch.html;
+  if (patch.append) return patch.append;
+  if (patch.prepend) return patch.prepend;
   return null;
 };

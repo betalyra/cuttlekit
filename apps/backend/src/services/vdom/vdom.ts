@@ -181,7 +181,7 @@ export class VdomService extends Effect.Service<VdomService>()("VdomService", {
 
     const define = (
       sessionId: string,
-      op: { tag: string; props: string[]; template: string }
+      op: { tag: string; props: readonly string[]; template: string }
     ) =>
       Effect.gen(function* () {
         const window = yield* getOrCreateWindow(sessionId)
@@ -307,9 +307,9 @@ export class VdomService extends Effect.Service<VdomService>()("VdomService", {
 
         // Re-render CEs after structural mutations and CE attr updates.
         const hasStructuralMutation = patches.some(
-          (p) => "append" in p || "prepend" in p || "html" in p
+          (p) => !!p.append || !!p.prepend || p.html !== undefined
         )
-        const hasAttrMutation = patches.some((p) => "attr" in p)
+        const hasAttrMutation = patches.some((p) => !!p.attr)
         if (hasStructuralMutation || hasAttrMutation) {
           const registry = yield* getRegistry(sessionId)
           if (registry.size > 0) {
